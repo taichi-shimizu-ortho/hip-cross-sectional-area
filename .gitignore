@@ -6,3 +6,14 @@ predictions
 Potsdam_data
 checkpoints
 cf_matrix.png
+
+# uv / Python
+.venv/
+*.pyc
+.pytest_cache/
+
+# 医用画像データ（絶対に push しない）
+data/
+*.dcm
+*.nii
+*.nii.gz
