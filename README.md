@@ -44,9 +44,10 @@ EOF
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run TotalSegmentator \
   -i data/ct_pelvis.nii.gz -o data/seg -d mps -s -sx \
   -rs gluteus_medius_left gluteus_medius_right \
-      gluteus_minimus_left gluteus_minimus_right
+      gluteus_minimus_left gluteus_minimus_right \
+      hip_left hip_right sacrum femur_left femur_right
 
-# 3. meshes + STL + rendered views
+# 3. meshes + STL + rendered views (muscles in colour, bone as reference)
 uv run python reconstruct_3d.py --seg-dir data/seg --out-dir data/mesh
 
 # 4. interactive local viewer (data/mesh/viewer.html)
@@ -55,6 +56,11 @@ uv run python make_viewer.py
 
 The crop range in step 1 is specific to this series — pick it from the CT so it spans
 the iliac crest down past the greater trochanter.
+
+The hip bones, sacrum and femurs are segmented purely as anatomical reference: they
+show the origin on the gluteal surface of the ilium and the insertion on the greater
+trochanter. The femurs are cut off by the inferior edge of the crop. In the viewer the
+bone can be dimmed or switched off, and the lateral views isolate one side.
 
 `-d mps` uses the Apple GPU; use `-d gpu` on a CUDA machine or `-d cpu` anywhere.
 

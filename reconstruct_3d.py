@@ -16,25 +16,40 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-
-# Labels are Japanese; fall back through the CJK faces macOS ships with.
-matplotlib.rcParams["font.family"] = [
-	"Hiragino Sans", "Hiragino Maru Gothic Pro", "YuGothic", "Arial Unicode MS", "DejaVu Sans",
-]
-matplotlib.rcParams["axes.unicode_minus"] = False
 import SimpleITK as sitk
 import vtk
 from scipy import ndimage
 from skimage import measure
 from vtk.util import numpy_support
 
-# Structures to reconstruct, in draw order (deepest first), with display colours.
-STRUCTURES = [
-	("gluteus_minimus_left", "小殿筋 (左)", "#e8543f"),
-	("gluteus_minimus_right", "小殿筋 (右)", "#f2a03d"),
-	("gluteus_medius_left", "中殿筋 (左)", "#3d7ff2"),
-	("gluteus_medius_right", "中殿筋 (右)", "#3fbfae"),
+BONE_COLOR = "#ddd2bd"
+
+# Muscles of interest, drawn deepest first.
+MUSCLES = [
+	("gluteus_minimus_left", "Gluteus minimus L", "#e8543f"),
+	("gluteus_minimus_right", "Gluteus minimus R", "#f2a03d"),
+	("gluteus_medius_left", "Gluteus medius L", "#3d7ff2"),
+	("gluteus_medius_right", "Gluteus medius R", "#3fbfae"),
 ]
+
+# Bony landmarks shown for reference: origin on the ilium, insertion on the
+# greater trochanter. The femur is cut off by the inferior edge of the crop.
+BONES = [
+	("hip_left", "Hip bone L", BONE_COLOR),
+	("hip_right", "Hip bone R", BONE_COLOR),
+	("sacrum", "Sacrum", BONE_COLOR),
+	("femur_left", "Femur L", BONE_COLOR),
+	("femur_right", "Femur R", BONE_COLOR),
+]
+
+
+def side_of(name):
+	"""'left' / 'right', or None for midline structures shown in every view."""
+	if name.endswith("_left"):
+		return "left"
+	if name.endswith("_right"):
+		return "right"
+	return None
 
 
 def load_mask(path):
@@ -114,13 +129,14 @@ def write_stl(poly, path):
 	w.Write()
 
 
-# Camera directions in patient (LPS) space: +x = left, +y = posterior, +z = superior.
+# Direction from the subject toward the camera, in patient (LPS) space:
+# +x = left, +y = posterior, +z = superior. So an anterior view sits at -y.
 # `side` limits a view to one side's muscles so the pair does not overlap.
 VIEWS = [
-	("後面 posterior", (0, 1, 0), (0, 0, 1), None),
-	("前面 anterior", (0, -1, 0), (0, 0, 1), None),
-	("左外側 left lateral", (1, 0, 0), (0, 0, 1), "left"),
-	("右外側 right lateral", (-1, 0, 0), (0, 0, 1), "right"),
+	("Posterior", (0, 1, 0), (0, 0, 1), None),
+	("Anterior", (0, -1, 0), (0, 0, 1), None),
+	("Left lateral", (1, 0, 0), (0, 0, 1), "left"),
+	("Right lateral", (-1, 0, 0), (0, 0, 1), "right"),
 ]
 
 
@@ -143,7 +159,8 @@ def render(meshes, out_path, title, size=(900, 780)):
 
 	tiles = []
 	for _, direction, up, side in VIEWS:
-		shown = [m for m in meshes if side is None or m["side"] == side]
+		shown = [m for m in meshes
+				 if side is None or m["side"] in (side, None)]
 		ren = vtk.vtkRenderer()
 		ren.SetBackground(1, 1, 1)
 		ren.SetUseDepthPeeling(True)
@@ -182,7 +199,7 @@ def render(meshes, out_path, title, size=(900, 780)):
 
 		cam = ren.GetActiveCamera()
 		cam.SetFocalPoint(*sub_center)
-		cam.SetPosition(*(sub_center - d * radius * 4.0))
+		cam.SetPosition(*(sub_center + d * radius * 4.0))
 		cam.SetViewUp(*up)
 		cam.SetParallelProjection(True)
 		cam.SetParallelScale(scale)
@@ -212,8 +229,12 @@ def render(meshes, out_path, title, size=(900, 780)):
 		ax.set_title(name, fontsize=12, pad=6)
 		ax.axis("off")
 	handles = [plt.Line2D([], [], marker="s", ls="", markersize=12,
-						  color=m["color"], label=m["label"]) for m in meshes]
-	fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=12)
+						  color=m["color"], label=m["label"])
+			   for m in meshes if m["kind"] == "muscle"]
+	if any(m["kind"] == "bone" for m in meshes):
+		handles.append(plt.Line2D([], [], marker="s", ls="", markersize=12,
+								  color=BONE_COLOR, label="Bone (reference)"))
+	fig.legend(handles=handles, loc="lower center", ncol=5, frameon=False, fontsize=12)
 	fig.suptitle(title, fontsize=15)
 	fig.tight_layout(rect=[0, 0.05, 1, 0.965])
 	fig.savefig(out_path, dpi=105, bbox_inches="tight", facecolor="white")
@@ -230,42 +251,43 @@ def main():
 	args.out_dir.mkdir(parents=True, exist_ok=True)
 
 	meshes, report = [], []
-	for name, label, color in STRUCTURES:
-		path = args.seg_dir / f"{name}.nii.gz"
-		if not path.exists():
-			print(f"skip (not found): {path}")
-			continue
+	for kind, group in (("muscle", MUSCLES), ("bone", BONES)):
+		for name, label, color in group:
+			path = args.seg_dir / f"{name}.nii.gz"
+			if not path.exists():
+				print(f"skip (not found): {path}")
+				continue
 
-		mask, spacing, origin = load_mask(path)
-		n_vox = int(mask.sum())
-		if n_vox == 0:
-			print(f"skip (empty mask): {name}")
-			continue
-		mask = largest_component(mask)
-		volume_ml = n_vox * float(np.prod(spacing)) / 1000.0
+			mask, spacing, origin = load_mask(path)
+			n_vox = int(mask.sum())
+			if n_vox == 0:
+				print(f"skip (empty mask): {name}")
+				continue
+			mask = largest_component(mask)
+			volume_ml = n_vox * float(np.prod(spacing)) / 1000.0
 
-		verts, faces = mask_to_mesh(mask, spacing, origin, args.smooth_sigma)
-		poly = refine(to_vtk(verts, faces), args.target_triangles)
-		verts, faces = from_vtk(poly)
+			verts, faces = mask_to_mesh(mask, spacing, origin, args.smooth_sigma)
+			poly = refine(to_vtk(verts, faces), args.target_triangles)
+			verts, faces = from_vtk(poly)
 
-		stl = args.out_dir / f"{name}.stl"
-		write_stl(poly, stl)
+			stl = args.out_dir / f"{name}.stl"
+			write_stl(poly, stl)
 
-		# minimus sits deep to medius, so draw it opaque and medius translucent
-		alpha = 1.0 if "minimus" in name else 0.35
-		meshes.append(dict(verts=verts, faces=faces, poly=poly, color=color,
-						   alpha=alpha, label=label,
-						   side="left" if name.endswith("_left") else "right"))
-		report.append(dict(structure=name, label=label, voxels=n_vox,
-						   volume_ml=round(volume_ml, 1), triangles=len(faces),
-						   stl=str(stl)))
-		print(f"{label:<12} {volume_ml:7.1f} mL  {len(faces):>6d} triangles  -> {stl}")
+			# minimus sits deep to medius, so it stays opaque and medius is a shell
+			alpha = 0.35 if "medius" in name else 1.0
+			meshes.append(dict(verts=verts, faces=faces, poly=poly, color=color,
+							   alpha=alpha, label=label, kind=kind,
+							   side=side_of(name)))
+			report.append(dict(structure=name, label=label, kind=kind, voxels=n_vox,
+							   volume_ml=round(volume_ml, 1), triangles=len(faces),
+							   stl=str(stl)))
+			print(f"{label:<18} {volume_ml:7.1f} mL  {len(faces):>6d} tris  -> {stl}")
 
 	if not meshes:
 		raise SystemExit("no masks found in " + str(args.seg_dir))
 
 	png = args.out_dir / "gluteal_muscles_3d.png"
-	render(meshes, png, "小殿筋・中殿筋 3D reconstruction")
+	render(meshes, png, "Gluteus medius / minimus — CT 3D reconstruction")
 	(args.out_dir / "volumes.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
 	print(f"\nrender  -> {png}")
 	print(f"volumes -> {args.out_dir / 'volumes.json'}")

@@ -18,3 +18,4 @@ data/
 *.nii
 *.nii.gz
 sampleDATA/
+.cache/
