@@ -145,7 +145,7 @@ if __name__ == '__main__':
     """ Evaluate samples of the test set to get performance metrics"""
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     # set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
     # Create datasets

@@ -41,38 +41,30 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
 
 
 def accuracy_coeff(preds, target, num_classes):
-    return torchmetrics.functional.accuracy(preds = preds,
-                                            target = target,
-                                            average='macro',
-                                            mdmc_average='global',
-                                            threshold=0.5,
-                                            top_k=None,
-                                            subset_accuracy=False,
+    return torchmetrics.functional.accuracy(preds=preds,
+                                            target=target,
+                                            task='multiclass',
                                             num_classes=num_classes,
-                                            multiclass=None,
+                                            average='macro',
+                                            multidim_average='global',
                                             ignore_index=None)
 
 
 def multiclass_accuracy(preds, target, num_classes):
-    return torchmetrics.functional.accuracy(preds = preds,
-                                            target = target,
-                                            average=None,
-                                            mdmc_average='global',
-                                            threshold=0.5,
-                                            top_k=None,
-                                            subset_accuracy=False,
+    return torchmetrics.functional.accuracy(preds=preds,
+                                            target=target,
+                                            task='multiclass',
                                             num_classes=num_classes,
-                                            multiclass=None,
+                                            average=None,
+                                            multidim_average='global',
                                             ignore_index=None)
 
 def F1_score(preds, target, num_classes):
     return torchmetrics.functional.f1_score(preds,
                         target,
+                        task='multiclass',
                         num_classes=num_classes,
-                        threshold=0.5,
                         average=None,
-                        mdmc_average='global',
+                        multidim_average='global',
                         ignore_index=None,
-                        top_k=None,
-                        multiclass=None,
                         )

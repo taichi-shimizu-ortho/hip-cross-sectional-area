@@ -6,3 +6,4 @@ matplotlib
 seaborn
 wandb
 torchvision
+torchmetrics

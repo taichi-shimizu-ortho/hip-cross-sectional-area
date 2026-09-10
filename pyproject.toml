@@ -5,17 +5,27 @@ requires-python = ">=3.10,<3.12"
 dependencies = [
     "matplotlib>=3.10.9",
     "numpy>=2.2.6",
+    "pydicom>=3.0.2",
     "scikit-image>=0.25.2",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
+    "simpleitk>=2.5.6",
     "torch",
+    "torchmetrics>=1.9.0",
     "torchvision",
+    "totalsegmentator>=2.18.0",
     "tqdm>=4.70.0",
     "wandb>=0.30.0",
 ]
+
+# Linux / Windows は CUDA 12.8 ビルド、macOS は PyPI の公式ビルド (Apple Silicon の MPS 対応)
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

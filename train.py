@@ -79,7 +79,7 @@ def train_net(net,
 		optimizer = optim_class(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
 		
 	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=patience)  # goal: maximize Dice score
-	grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
+	grad_scaler = torch.amp.GradScaler(device.type, enabled=amp)
 	criterion = nn.CrossEntropyLoss()
 	global_step = 0
 
@@ -100,7 +100,7 @@ def train_net(net,
 				images = images.to(device=device, dtype=torch.float32)
 				true_masks = true_masks.to(device=device, dtype=torch.float32)
 
-				with torch.cuda.amp.autocast(enabled=amp):
+				with torch.amp.autocast(device.type, enabled=amp):
 					masks_pred = net(images)
 					loss = criterion(masks_pred, true_masks) \
 						   + dice_loss(F.softmax(masks_pred, dim=1).float(),
@@ -207,7 +207,7 @@ if __name__ == '__main__':
 	args = get_args()
 
 	logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+	device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 	logging.info(f'Using device {device}')
 
 	# Create datasets

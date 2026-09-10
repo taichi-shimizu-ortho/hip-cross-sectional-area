@@ -159,7 +159,7 @@ def predict(net, inputs, targets=None, device="cpu", normalization_mean=0, norma
 
 if __name__ == "__main__":
 	# device
-	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+	device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
 
 	# create repo for predictions if needed
 	if not os.path.exists("./predictions"):
