@@ -20,7 +20,10 @@ data/
 sampleDATA/
 .cache/
 
-# ハンドアウト生成（node_modules と患者由来の図を含む出力）
+# macOS
+.DS_Store
+
+# ハンドアウト生成（実測値入りの原稿・node_modules・患者由来の図を含む出力）
 docs/zoom_handout/node_modules/
 docs/zoom_handout/out/
-docs/zoom_handout/handout.local.json
+docs/zoom_handout/handout.json

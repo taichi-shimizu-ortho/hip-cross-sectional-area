@@ -43,11 +43,12 @@ type Slide = {
 };
 type Handout = { meta: Record<string, string | number>; slides: Slide[] };
 
-// handout.json is the public draft, with the measured values blanked out.
-// handout.local.json holds the real ones and stays out of the repository.
-const source = ['handout.local.json', 'handout.json']
-	.map((name) => resolve(ROOT, name))
-	.find((path) => existsSync(path))!;
+// handout.json carries measured values and a local output path, so it is
+// gitignored — a fresh clone has to bring its own (see README).
+const source = resolve(ROOT, 'handout.json');
+if (!existsSync(source)) {
+	throw new Error(`${source} not found — it is gitignored; see docs/zoom_handout/README.md`);
+}
 const handout: Handout = JSON.parse(readFileSync(source, 'utf8'));
 
 /** Where the deck is written: meta.output_dir, or HANDOUT_OUT_DIR to override. */
@@ -345,7 +346,6 @@ async function finalize(file: string, slides: Slide[]) {
 const outFile = resolve(OUT_DIR, OUT_NAME);
 const result = await finalize(outFile, handout.slides);
 
-console.log(`source   : ${basename(source)}`);
 console.log(`slides   : ${result.order} (expected ${total})`);
 console.log(`notes    : ${result.written} / ${total}`);
 console.log(`pruned   : ${result.dropped} prototype notes parts`);
