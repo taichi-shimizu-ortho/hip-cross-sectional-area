@@ -2,6 +2,10 @@
 
 # Pytorch Bayesian UNet model for segmentation and uncertainty prediction 
 
+> Derived from [tha-santacruz/BayesianUNet](https://github.com/tha-santacruz/BayesianUNet)
+> (GPL-3.0). This copy adds a CT pipeline for the gluteal muscles; the upstream
+> example images are not carried over, so the history is small.
+
 This repository provides the well-known UNet model [[1]](#1) converted to a Bayesian UNet model.
 This model has been coded using Pytorch. This code is a modified version of the original the original implementation of UNet model in Pytorch by milesial (https://github.com/milesial/Pytorch-UNet).
 The model has been implemented using the Monte Carlo Dropout method [[2]](#2).
