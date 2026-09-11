@@ -54,6 +54,27 @@ uv run python reconstruct_3d.py --seg-dir data/seg --out-dir data/mesh
 uv run python make_viewer.py
 ```
 
+### Cross-sectional area
+
+`measure_area.py` turns the same masks into cross-sectional areas. It counts the
+mask voxels on every axial slice, scales them by the in-plane pixel area, and
+reports each muscle at a reproducible craniocaudal level — the apex of the
+femoral head, read from the femur mask, so no slice is picked by hand.
+
+```bash
+uv run python measure_area.py --seg-dir data/seg --ct data/ct_pelvis.nii.gz
+```
+
+Writes to `data/area/`: `csa_profile.csv` (CSA of every muscle on every slice),
+`area_summary.json` (CSA at the reference level, peak CSA and its offset, mean
+CSA, volume, craniocaudal length and mean HU per muscle), plus a CSA-versus-level
+plot and an overlay of the reference slice. Pass `--level <slice>` to measure at
+a different height.
+
+Note that a muscle running past the edge of the crop is truncated: its CSA is
+still valid, its volume is not. Gluteus maximus in the sample series is cut off
+inferiorly for exactly this reason.
+
 The crop range in step 1 is specific to this series — pick it from the CT so it spans
 the iliac crest down past the greater trochanter.
 

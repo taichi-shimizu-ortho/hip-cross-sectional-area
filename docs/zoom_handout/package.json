@@ -1,0 +1,22 @@
+{
+  "name": "gluteal-area-handout",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Builds the Zoom handout deck for the gluteal muscle area workflow from handout.json",
+  "scripts": {
+    "template": "tsx src/make_template.ts",
+    "build": "tsx src/build_pptx.ts",
+    "all": "npm run template && npm run build"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "pptx-automizer": "^0.9.3",
+    "pptxgenjs": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

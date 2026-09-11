@@ -1,0 +1,673 @@
+{
+  "meta": {
+    "title": "CT から殿筋の断面積を測る",
+    "subtitle": "TotalSegmentator + 3D 再構成パイプラインの共同研究者向け説明",
+    "presenter": "清水 太一",
+    "audience": "共同研究者（Zoom）",
+    "date": "2026-XX-XX",
+    "duration_min": 40,
+    "repository": "BayesianUNet / branch: gluteal-3d-pelvis-and-viewer-ux",
+    "disclaimer": "研究用途限定 — セグメンテーションはモデル出力であり臨床的な検証・読影は行っていません。診断には使用しないでください。",
+    "sample_case": "サンプル 1 例（骨盤 CT）。実測値は handout.local.json（gitignore 済み）に記載",
+    "font": "BIZ UDGothic",
+    "output_dir": "out",
+    "note": "このファイルは公開用の雛形です。実測値を入れた handout.local.json があれば、ビルドはそちらを優先します"
+  },
+  "agenda": [
+    {
+      "title": "目的と全体像",
+      "minutes": 5
+    },
+    {
+      "title": "セットアップと 3 ステップの実行手順",
+      "minutes": 12
+    },
+    {
+      "title": "面積の定義と基準レベル",
+      "minutes": 8
+    },
+    {
+      "title": "結果の読み方（実測値・プロファイル・3D QC）",
+      "minutes": 10
+    },
+    {
+      "title": "限界・プロトコル・次のステップ",
+      "minutes": 5
+    }
+  ],
+  "slides": [
+    {
+      "id": "cover",
+      "layout": "title",
+      "title": "CT から殿筋の断面積を測る",
+      "subtitle": "TotalSegmentator + 3D 再構成パイプラインの使い方",
+      "meta": [
+        "共同研究者向け Zoom 説明会 ｜ 40 分",
+        "BayesianUNet リポジトリ / gluteal-3d-pelvis-and-viewer-ux",
+        "研究用途限定・臨床診断には使用しません"
+      ],
+      "notes": "本日は、CT から殿筋（大殿筋・中殿筋・小殿筋）の断面積を、手作業のトレースなしに測る手順を共有します。最後まで見ていただければ、ご自身の環境で同じ数値を再現できる状態になります。まず 5 分で全体像、その後にコマンドを 3 ステップで追い、最後に測定の定義と限界を確認します。"
+    },
+    {
+      "id": "goal",
+      "layout": "bullets",
+      "title": "本日のゴール",
+      "lead": "「CT を渡されたら、同じ定義で殿筋の断面積が出せる」状態を共有します",
+      "bullets": [
+        {
+          "text": "① 何が自動で、何が人の判断かを区別できる",
+          "level": 0
+        },
+        {
+          "text": "自動：筋のセグメンテーション、面積・体積の計算、作図",
+          "level": 1
+        },
+        {
+          "text": "人：クロップ範囲の指定と、結果の QC（目視確認）",
+          "level": 1
+        },
+        {
+          "text": "② コマンド 3 つ（変換 → セグメント → 計測）を自分で回せる",
+          "level": 0
+        },
+        {
+          "text": "③ 出力された CSA（断面積）が何を意味するか説明できる",
+          "level": 0
+        },
+        {
+          "text": "④ 多施設で数値を揃えるための共通プロトコルに合意する",
+          "level": 0
+        }
+      ],
+      "footnote": "本日の資料と JSON 版ハンドアウトは docs/zoom_handout/ に置いています",
+      "notes": "ゴールは 4 つ。特に ④ が今日決めたいことです。クロップ範囲と基準レベルの定義が施設ごとにずれると、数値が比較できなくなります。ここだけは合意して終わりたいと思います。"
+    },
+    {
+      "id": "why-area",
+      "layout": "bullets",
+      "title": "なぜ「面積」なのか — 体積ではなく断面積を測る理由",
+      "lead": "殿筋の量的評価には体積(mL)と断面積(cm²)の 2 通りがあり、目的が違います",
+      "bullets": [
+        {
+          "text": "断面積 CSA (cross-sectional area)：1 枚の軸位断で測る。撮影範囲が短い CT でも測れ、過去の文献値と比較しやすい",
+          "level": 0
+        },
+        {
+          "text": "体積：撮影範囲が筋の全長を含んでいることが前提。範囲が切れると過小評価になる",
+          "level": 0
+        },
+        {
+          "text": "本サンプルでも大殿筋はクロップ下端で切れており、体積は過小評価・CSA は測定可能",
+          "level": 1
+        },
+        {
+          "text": "臨床的関心：中殿筋・小殿筋の萎縮と脂肪変性 → 股関節外転筋力、跛行、術後成績との関連",
+          "level": 0
+        },
+        {
+          "text": "面積は「どのスライスで測るか」で値が変わる → 基準レベルの定義が生命線",
+          "level": 0
+        }
+      ],
+      "footnote": "本パイプラインは CSA・体積・平均 CT 値(HU) を同時に出力します",
+      "notes": "面積か体積かは目的次第です。今回のパイプラインは両方出しますが、多施設で比較するなら CSA の方が頑健です。ただし面積は測る高さで大きく変わるので、後半で説明する基準レベルの定義が最重要になります。"
+    },
+    {
+      "id": "pipeline",
+      "layout": "flow",
+      "title": "パイプライン全体像",
+      "lead": "DICOM から数値まで、ローカル完結・1 例あたり数分〜十数分",
+      "items": [
+        {
+          "step": "01",
+          "title": "DICOM → NIfTI",
+          "detail": "SimpleITK でシリーズを読み、骨盤部にクロップ"
+        },
+        {
+          "step": "02",
+          "title": "自動セグメンテーション",
+          "detail": "TotalSegmentator で殿筋・寛骨・仙骨・大腿骨のマスク"
+        },
+        {
+          "step": "03",
+          "title": "面積計測",
+          "detail": "measure_area.py が CSA / 体積 / HU を算出"
+        },
+        {
+          "step": "04",
+          "title": "3D 再構成",
+          "detail": "reconstruct_3d.py が STL とレンダリング画像"
+        },
+        {
+          "step": "05",
+          "title": "QC・共有",
+          "detail": "viewer.html で対話的に確認、CSV/JSON を統計解析へ"
+        }
+      ],
+      "footnote": "患者データは data/ と sampleDATA/ に置き、いずれも .gitignore 済み（リポジトリには push しない）",
+      "notes": "全体像です。01 と 02 は既存ツールの組み合わせ、03 が今日の本題である面積計測、04・05 は QC と共有用です。ネットワークに患者データを出す処理はありません。唯一の外部通信は TotalSegmentator の学習済み重みの初回ダウンロードだけです。"
+    },
+    {
+      "id": "setup",
+      "layout": "steps",
+      "title": "セットアップ（初回のみ）",
+      "lead": "uv で環境を固定します。Linux/Windows は CUDA、macOS は Metal(MPS) が自動で選ばれます",
+      "steps": [
+        {
+          "label": "リポジトリ取得",
+          "command": "git clone <repo> && cd BayesianUNet",
+          "detail": "ブランチ gluteal-3d-pelvis-and-viewer-ux を使用"
+        },
+        {
+          "label": "依存関係の同期",
+          "command": "uv sync",
+          "detail": "Python 3.11 の .venv を作成し、uv.lock のバージョンで固定"
+        },
+        {
+          "label": "動作確認",
+          "command": "uv run python -c \"import torch; print(torch.backends.mps.is_available())\"",
+          "detail": "CUDA 機は torch.cuda.is_available() を確認"
+        }
+      ],
+      "footnote": "TotalSegmentator の学習済み重み（約 880 MB）は初回実行時に自動ダウンロードされます。macOS では --amp を付けないでください",
+      "notes": "環境は uv で完全に固定されます。conda や pip の手順も README に残していますが、数値の再現性を揃えたいので uv を推奨します。GPU が無くても -d cpu で動きますが、1 例あたり十数分かかります。"
+    },
+    {
+      "id": "step1",
+      "layout": "steps",
+      "title": "Step 1 — DICOM を NIfTI に変換し、骨盤部を切り出す",
+      "lead": "唯一の手作業がここ。クロップ範囲だけは CT を見て決めます",
+      "steps": [
+        {
+          "label": "シリーズ読み込み",
+          "command": "r.SetFileNames(r.GetGDCMSeriesFileNames(\"sampleDATA\"))",
+          "detail": "SimpleITK の ImageSeriesReader でスライスを順に読む"
+        },
+        {
+          "label": "全体を保存",
+          "command": "sitk.WriteImage(img, \"data/ct.nii.gz\", useCompression=True)",
+          "detail": "元シリーズを 1 ファイルに"
+        },
+        {
+          "label": "骨盤部をクロップ",
+          "command": "sitk.WriteImage(img[:, :, 680:940], \"data/ct_pelvis.nii.gz\")",
+          "detail": "腸骨稜の上から大転子の下までを含む範囲（この症例では 680〜940）"
+        }
+      ],
+      "footnote": "クロップ範囲は症例ごとに異なります。上端＝腸骨稜より頭側、下端＝大転子より尾側、が最低条件",
+      "notes": "ここだけは症例ごとに数字を変える必要があります。範囲が足りないと中殿筋の起始や小殿筋が欠けます。逆に広すぎるとセグメンテーションの計算時間が伸びるだけなので、腸骨稜と大転子を含む最小範囲を狙ってください。切り出し後のサイズは 512 x 512 x 260 でした。"
+    },
+    {
+      "id": "step2",
+      "layout": "steps",
+      "title": "Step 2 — TotalSegmentator で筋と骨のマスクを作る",
+      "lead": "殿筋 3 対に加えて、基準レベル決定に使う骨も同時に出します",
+      "steps": [
+        {
+          "label": "実行",
+          "command": "PYTORCH_ENABLE_MPS_FALLBACK=1 uv run TotalSegmentator -i data/ct_pelvis.nii.gz -o data/seg -d mps -s -sx",
+          "detail": "-d は mps(Mac) / gpu(CUDA) / cpu。-s -sx で統計と追加出力"
+        },
+        {
+          "label": "対象構造の指定",
+          "command": "-rs gluteus_maximus_left gluteus_maximus_right gluteus_medius_left gluteus_medius_right gluteus_minimus_left gluteus_minimus_right hip_left hip_right sacrum femur_left femur_right",
+          "detail": "筋 6 つ＋骨 5 つ。骨は基準レベルと解剖学的参照に使用"
+        },
+        {
+          "label": "出力確認",
+          "command": "ls data/seg/*.nii.gz",
+          "detail": "構造ごとに 1 つの NIfTI マスク（元 CT と同じ格子）が出力される"
+        }
+      ],
+      "footnote": "マスクは元 CT と同一の size / spacing / origin。以降の計算はすべてこの格子の上で行われます",
+      "notes": "TotalSegmentator は CT 全身用の学習済みモデルです。対象構造を -rs で絞ると実行時間が短くなります。骨を一緒に出しているのは見た目のためだけでなく、次に説明する基準スライスを大腿骨頭から自動で決めるためです。"
+    },
+    {
+      "id": "step3",
+      "layout": "steps",
+      "title": "Step 3 — 断面積を計測する",
+      "lead": "measure_area.py が全スライスの CSA を計算し、CSV / JSON / 図を出力します",
+      "steps": [
+        {
+          "label": "計測",
+          "command": "uv run python measure_area.py --seg-dir data/seg --ct data/ct_pelvis.nii.gz",
+          "detail": "既定の出力先は data/area/"
+        },
+        {
+          "label": "基準レベルを手動指定する場合",
+          "command": "uv run python measure_area.py --level 100",
+          "detail": "スライス番号を直接指定。既定は大腿骨頭最上端を自動検出"
+        },
+        {
+          "label": "3D 再構成（任意）",
+          "command": "uv run python reconstruct_3d.py --seg-dir data/seg --out-dir data/mesh && uv run python make_viewer.py",
+          "detail": "STL・レンダリング画像・ローカルビューアを生成"
+        }
+      ],
+      "footnote": "出力：csa_profile.csv / area_summary.json / csa_profile.png / csa_reference_slice.png",
+      "notes": "コマンドはこれだけです。measure_area.py はマスクを読むだけなので数秒で終わります。GPU も不要です。セグメンテーションをやり直さずにパラメータだけ変えて再計算できるので、基準レベルの感度解析もすぐできます。"
+    },
+    {
+      "id": "definition",
+      "layout": "bullets",
+      "title": "面積の定義 — 何をどう測っているか",
+      "lead": "CSA = 1 スライス内のマスク voxel 数 × 面内ピクセル面積",
+      "bullets": [
+        {
+          "text": "CSA [cm²] = voxel 数 × 面内ピクセル面積 (mm²) ÷ 100 　（面内ピクセル面積は CT ヘッダの spacing から自動取得）",
+          "level": 0
+        },
+        {
+          "text": "軸位断（z 軸に垂直）で計測。筋の走行に直交する断面ではないため、正確には「軸位断面積」",
+          "level": 0
+        },
+        {
+          "text": "左右の筋を別々に集計。左右差はそのまま指標として使えます",
+          "level": 0
+        },
+        {
+          "text": "同時に算出：ピーク CSA とその位置、平均 CSA、体積、頭尾方向の長さ、基準レベルでの平均 CT 値(HU)",
+          "level": 0
+        },
+        {
+          "text": "平均 HU は脂肪変性の代用指標（低いほど脂肪浸潤が多い）。閾値による筋内脂肪の分離は未実装",
+          "level": 1
+        }
+      ],
+      "footnote": "ピクセル面積は CT のヘッダから読むため、スライス厚や FOV が異なる施設でも同じ式で比較できます",
+      "notes": "面積の中身はとても単純です。マスクの voxel を数えて、ヘッダの spacing を掛けるだけ。手作業の ROI トレースと違って、同じマスクからは必ず同じ数字が出ます。注意点は軸位断で測っているということ。筋束に直交する断面ではないので、文献の PCSA（生理学的断面積）とは別物です。"
+    },
+    {
+      "id": "reference-level",
+      "layout": "image",
+      "title": "基準レベルの決め方 — 大腿骨頭最上端",
+      "image": "../../data/area/csa_reference_slice.png",
+      "caption": "基準スライス（大腿骨頭最上端）と各筋の輪郭・CSA",
+      "bullets": [
+        {
+          "text": "大腿骨マスクの最も頭側のスライス＝大腿骨頭最上端を自動検出",
+          "level": 0
+        },
+        {
+          "text": "人が目視でスライスを選ばないため、施設間・観察者間のばらつきが出ない",
+          "level": 0
+        },
+        {
+          "text": "左右それぞれの大腿骨で判定するので、骨盤の傾きにも追従",
+          "level": 0
+        },
+        {
+          "text": "別の基準（大転子先端など）を使いたい場合は --level で上書き可能",
+          "level": 0
+        }
+      ],
+      "footnote": "骨盤に傾きがある症例では、左右で基準スライスが別々に決まります",
+      "notes": "ここが今日いちばん議論したい部分です。基準レベルを人が選ぶと、そこで再現性が壊れます。大腿骨頭の最上端はセグメンテーション結果から一意に決まるので、誰が走らせても同じスライスになります。図は実際の基準スライスで、6 つの輪郭がマスクの境界、数字がそのスライスの CSA です。"
+    },
+    {
+      "id": "results-table",
+      "layout": "table",
+      "title": "サンプル 1 例の実測値",
+      "lead": "measure_area.py の出力（data/area/area_summary.json）をそのまま貼る欄です",
+      "table": {
+        "headers": [
+          "筋",
+          "基準レベル CSA (cm²)",
+          "ピーク CSA (cm²)",
+          "ピーク位置 (mm)",
+          "体積 (mL)",
+          "平均 HU"
+        ],
+        "rows": [
+          [
+            "大殿筋 左",
+            "—",
+            "—",
+            "—",
+            "—",
+            "—"
+          ],
+          [
+            "大殿筋 右",
+            "—",
+            "—",
+            "—",
+            "—",
+            "—"
+          ],
+          [
+            "中殿筋 左",
+            "—",
+            "—",
+            "—",
+            "—",
+            "—"
+          ],
+          [
+            "中殿筋 右",
+            "—",
+            "—",
+            "—",
+            "—",
+            "—"
+          ],
+          [
+            "小殿筋 左",
+            "—",
+            "—",
+            "—",
+            "—",
+            "—"
+          ],
+          [
+            "小殿筋 右",
+            "—",
+            "—",
+            "—",
+            "—",
+            "—"
+          ]
+        ]
+      },
+      "footnote": "ピーク位置は基準レベルからの頭側(+)/尾側(-)距離。クロップ下端で切れた筋は体積が過小評価になるため注記すること",
+      "notes": "実測値を読み上げるスライドです。左右差がどの筋にどの程度あるかを指摘し、クロップで切れている筋の体積には注記が必要だと伝えてください。"
+    },
+    {
+      "id": "profile",
+      "layout": "image",
+      "title": "CSA プロファイル — 高さごとに面積がどう変わるか",
+      "image": "../../data/area/csa_profile.png",
+      "caption": "基準レベル（0 mm）を原点とした頭尾方向の CSA 曲線（実線＝左, 破線＝右）",
+      "bullets": [
+        {
+          "text": "横軸は大腿骨頭最上端からの距離なので、症例間でそのまま重ねられる",
+          "level": 0
+        },
+        {
+          "text": "中殿筋・小殿筋は基準レベルより頭側でピークを迎える",
+          "level": 0
+        },
+        {
+          "text": "左右の曲線の差＝左右差がどの高さで生じているかが分かる",
+          "level": 0
+        },
+        {
+          "text": "曲線の端が急に立ち上がる場合はクロップ切断のサイン（QC 指標として使える）",
+          "level": 0
+        }
+      ],
+      "footnote": "元データは csa_profile.csv（1 行 = 1 スライス、列 = 各筋の CSA）",
+      "notes": "1 枚の面積だけでなく、全スライスの面積を曲線として出しています。これを見ると、基準レベルで測った値が筋のどのあたりなのかが分かります。曲線が端で切れずに続いていれば、そこはクロップで切断されているサインです。"
+    },
+    {
+      "id": "outputs",
+      "layout": "table",
+      "title": "出力ファイルと使いみち",
+      "lead": "統計解析に渡すのは CSV と JSON の 2 つだけで足ります",
+      "table": {
+        "headers": [
+          "ファイル",
+          "内容",
+          "使いみち"
+        ],
+        "rows": [
+          [
+            "data/area/csa_profile.csv",
+            "スライスごとの全筋 CSA",
+            "R / Python で症例間比較、曲線の重ね描き"
+          ],
+          [
+            "data/area/area_summary.json",
+            "筋ごとの CSA・体積・HU・基準スライス",
+            "症例データベースへの取り込み"
+          ],
+          [
+            "data/area/csa_reference_slice.png",
+            "基準スライスの輪郭図",
+            "QC・論文 Figure"
+          ],
+          [
+            "data/area/csa_profile.png",
+            "CSA 曲線",
+            "QC・論文 Figure"
+          ],
+          [
+            "data/mesh/volumes.json",
+            "構造ごとの体素数と体積",
+            "体積解析"
+          ],
+          [
+            "data/mesh/*.stl",
+            "3D サーフェスメッシュ",
+            "他ソフトでの形態解析・3D プリント"
+          ],
+          [
+            "data/mesh/viewer.html",
+            "ローカル 3D ビューア",
+            "画面共有での確認、QC"
+          ]
+        ]
+      },
+      "footnote": "data/ 以下は .gitignore 済み。患者由来データはリポジトリに入りません",
+      "notes": "解析の入口は CSV と JSON です。列名は構造名そのままなので、そのまま pandas や R で読めます。PNG は QC と Figure 用、STL とビューアは形の確認用です。"
+    },
+    {
+      "id": "qc-3d",
+      "layout": "image",
+      "title": "3D 再構成とビューアで QC する",
+      "image": "../../data/mesh/gluteal_muscles_3d.png",
+      "caption": "reconstruct_3d.py の出力（中殿筋は半透明、骨は解剖学的参照）",
+      "bullets": [
+        {
+          "text": "マスクの誤り（隣接筋の取り込み、穴、飛び地）は 3D で見るといちばん早く分かる",
+          "level": 0
+        },
+        {
+          "text": "viewer.html：2 本指ドラッグで回転、ピンチでズーム、⇧+2 本指でパン",
+          "level": 0
+        },
+        {
+          "text": "不透明度スライダで中殿筋を透かし、深層の小殿筋を確認できる",
+          "level": 0
+        },
+        {
+          "text": "骨（寛骨・仙骨・大腿骨）は起始・停止の位置関係を示す参照で、計測には使いません",
+          "level": 0
+        }
+      ],
+      "footnote": "ビューアは自己完結した HTML（three.js を同梱）。患者データはローカルから出ません",
+      "notes": "数値だけ見ていると誤ったセグメンテーションに気づけません。3D で 1 回見るのを必須の手順にしてください。特に小殿筋は中殿筋との境界が薄いので、透明度を変えて確認すると分かりやすいです。ビューアは Mac のトラックパッド操作に合わせてあります。"
+    },
+    {
+      "id": "limitations",
+      "layout": "bullets",
+      "title": "限界と注意点（重要）",
+      "lead": "この数値をそのまま臨床判断に使わないための前提条件です",
+      "bullets": [
+        {
+          "text": "セグメンテーションは未検証：TotalSegmentator の出力を医師が確認していません。研究用途限定です",
+          "level": 0
+        },
+        {
+          "text": "クロップ依存：撮影・切り出し範囲の外に出た部分は測れません（本症例の大殿筋の体積が該当）",
+          "level": 0
+        },
+        {
+          "text": "部分容積効果：筋膜・脂肪との境界 1〜2 voxel は曖昧。スライス厚が厚いほど影響が大きい",
+          "level": 0
+        },
+        {
+          "text": "軸位断面積であり、筋束に直交する生理学的断面積(PCSA)ではありません",
+          "level": 0
+        },
+        {
+          "text": "造影の有無・撮影プロトコルの違いは HU に直接影響します（施設間で揃える必要あり）",
+          "level": 0
+        },
+        {
+          "text": "リポジトリ本体の Bayesian UNet（不確実性推定）は別系統で、本パイプラインでは使用していません",
+          "level": 0
+        }
+      ],
+      "footnote": "研究用途限定 — 診断には使用しないこと",
+      "notes": "限界は正直に共有しておきます。特に 1 点目、マスクは臨床的に検証されていません。論文にする際は、少なくとも数例で用手トレースとの一致度（Dice や CSA の級内相関）を出す必要があると考えています。ここは相談したいところです。"
+    },
+    {
+      "id": "protocol",
+      "layout": "bullets",
+      "title": "共通プロトコル案 — 数値を揃えるための取り決め",
+      "lead": "この 6 点を揃えれば、施設が違っても同じ土俵で比較できます",
+      "bullets": [
+        {
+          "text": "① 撮影：スライス厚 1.0 mm 以下、軸位断、体位は仰臥位・下肢中間位",
+          "level": 0
+        },
+        {
+          "text": "② クロップ：腸骨稜の頭側から大転子の尾側まで（大殿筋の体積が必要なら坐骨結節の尾側まで）",
+          "level": 0
+        },
+        {
+          "text": "③ 基準レベル：大腿骨頭最上端（自動検出、左右別）",
+          "level": 0
+        },
+        {
+          "text": "④ 出力指標：基準レベル CSA、ピーク CSA、平均 HU を全例で記録",
+          "level": 0
+        },
+        {
+          "text": "⑤ QC：3D ビューアでの目視確認を全例で実施し、修正の有無を記録",
+          "level": 0
+        },
+        {
+          "text": "⑥ 匿名化：施設で匿名化した DICOM のみ受け渡し。data/ は共有しない",
+          "level": 0
+        }
+      ],
+      "footnote": "本日の合意事項として持ち帰り、プロトコル文書に反映します",
+      "notes": "今日いちばん決めたいのがこのスライドです。特に ② と ③。撮影範囲が足りないと後から取り返せないので、先に決めておきたい。ご意見をいただければその場で修正します。"
+    },
+    {
+      "id": "next",
+      "layout": "bullets",
+      "title": "分担と次のステップ",
+      "lead": "次回までにここまで進めたい、という提案です",
+      "bullets": [
+        {
+          "text": "こちら：measure_area.py のバッチ処理版（複数症例を一括、1 行 1 症例の集計 CSV）",
+          "level": 0
+        },
+        {
+          "text": "こちら：用手トレースとの比較用に、基準スライスの ROI を DICOM-SEG で書き出し",
+          "level": 0
+        },
+        {
+          "text": "共同研究者：対象症例の選定基準と目標症例数の確定",
+          "level": 0
+        },
+        {
+          "text": "共同研究者：匿名化 CT を 3〜5 例、パイロットとして提供",
+          "level": 0
+        },
+        {
+          "text": "共同：プロトコル文書の確定、倫理申請の要否確認",
+          "level": 0
+        }
+      ],
+      "footnote": "次回ミーティング：パイロット症例の結果レビュー",
+      "notes": "分担の提案です。まずパイロットで 3〜5 例回して、用手トレースとの一致度を見てから本番の症例数を決めるのが安全だと思います。"
+    },
+    {
+      "id": "closing",
+      "layout": "closing",
+      "title": "まとめ",
+      "bullets": [
+        {
+          "text": "コマンド 3 つで、DICOM から殿筋の断面積まで到達できます",
+          "level": 0
+        },
+        {
+          "text": "基準レベルは大腿骨頭最上端で自動決定 — 人がスライスを選ばない",
+          "level": 0
+        },
+        {
+          "text": "CSA・体積・HU・3D を同じマスクから同時に出力",
+          "level": 0
+        },
+        {
+          "text": "研究用途限定。臨床応用にはセグメンテーションの検証が必要です",
+          "level": 0
+        }
+      ],
+      "footnote": "質問・再現でつまずいた点は、リポジトリの Issue かメールでお願いします",
+      "notes": "まとめです。この後 Q&A に入ります。画面共有のまま実際に 1 例流すこともできますので、見たい方は言ってください。"
+    }
+  ],
+  "appendix": {
+    "commands": [
+      {
+        "purpose": "環境構築",
+        "command": "uv sync"
+      },
+      {
+        "purpose": "DICOM → NIfTI + クロップ",
+        "command": "README の Step 1 スニペット（SimpleITK）"
+      },
+      {
+        "purpose": "セグメンテーション",
+        "command": "PYTORCH_ENABLE_MPS_FALLBACK=1 uv run TotalSegmentator -i data/ct_pelvis.nii.gz -o data/seg -d mps -s -sx -rs ..."
+      },
+      {
+        "purpose": "面積計測",
+        "command": "uv run python measure_area.py"
+      },
+      {
+        "purpose": "3D 再構成",
+        "command": "uv run python reconstruct_3d.py --seg-dir data/seg --out-dir data/mesh"
+      },
+      {
+        "purpose": "ビューア生成",
+        "command": "uv run python make_viewer.py"
+      }
+    ],
+    "glossary": [
+      {
+        "term": "CSA",
+        "definition": "cross-sectional area。軸位断 1 枚における筋の断面積 (cm²)"
+      },
+      {
+        "term": "基準レベル",
+        "definition": "CSA を測る高さ。本パイプラインでは大腿骨頭最上端のスライス"
+      },
+      {
+        "term": "HU",
+        "definition": "Hounsfield Unit。筋内の平均値は脂肪変性の代用指標"
+      },
+      {
+        "term": "マスク",
+        "definition": "構造ごとの 2 値画像。元 CT と同じ格子上に定義される"
+      },
+      {
+        "term": "STL",
+        "definition": "三角形メッシュの標準形式。3D 表示・形態解析に使用"
+      }
+    ],
+    "faq": [
+      {
+        "q": "GPU がなくても動きますか",
+        "a": "動きます。TotalSegmentator に -d cpu を指定してください。1 例あたり十数分かかります"
+      },
+      {
+        "q": "造影 CT でも測れますか",
+        "a": "測れますが HU が変わります。比較する症例群では造影条件を揃えてください"
+      },
+      {
+        "q": "マスクを手で修正したい",
+        "a": "data/seg の NIfTI を 3D Slicer 等で編集し、measure_area.py を再実行すれば数値は更新されます"
+      },
+      {
+        "q": "患者データが外部に出ませんか",
+        "a": "出ません。外部通信は TotalSegmentator の重みの初回ダウンロードと、ビューアの three.js 取得のみです"
+      }
+    ]
+  }
+}
