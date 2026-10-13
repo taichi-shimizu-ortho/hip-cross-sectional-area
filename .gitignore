@@ -23,6 +23,10 @@ sampleDATA/
 # macOS
 .DS_Store
 
+# Local grant figures: patient-derived images, decks, masks, model weights and caches
+/tmp/
+/output/
+
 # ハンドアウト生成（実測値入りの原稿・node_modules・患者由来の図を含む出力）
 docs/zoom_handout/node_modules/
 docs/zoom_handout/out/
