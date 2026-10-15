@@ -38,12 +38,26 @@ Compartments, not single muscles: posterior = hamstrings, medial = adductors.
 Runs on macOS with the project environment:
 
     uv run python scripts/grant_figures/render_figure.py --thigh --ct-dir <dir with ct_*_plain.png> --out <dir>
-    uv run --with python-pptx python scripts/grant_figures/update_ppt.py --images <same dir>
 
-`update_ppt.py` edits the hand-edited `output/grant figure.pptx` in place: it swaps
-the two 3D pictures, rebuilds the legend and replaces the note line, and keeps a
-copy of the previous deck in the image folder. The proximal tendinous part of the
-hamstrings is not included in the compartment masks.
+The proximal tendinous part of the hamstrings is not included in the compartment
+masks.
+
+## Deck as JSON
+
+Each version of the editable deck is kept as a JSON file plus the source PNGs it
+points to, so old PPTX files need not be kept. `deck_json.py` converts both ways:
+
+    uv run --with python-pptx python scripts/grant_figures/deck_json.py to-json "<deck>.pptx" "<deck>.json"
+    uv run --with python-pptx python scripts/grant_figures/deck_json.py build "<deck>.json"
+
+`to-json` finds each embedded picture's source file by content (in the JSON's
+folder, or the folders given with `--search`) and stores its path relative to the
+JSON. Text, positions, colours and fonts are stored as plain values, so a legend
+entry or label can be edited in the JSON and rebuilt. `build` writes next to the
+JSON and will not overwrite an existing PPTX without `--force`. A deck edited by
+hand in PowerPoint is brought back with `to-json`; anything the converter does not
+understand (groups, cropped pictures, line breaks inside a paragraph, ...) stops
+the conversion rather than being dropped.
 
 ## Optional hamstrings reference
 
