@@ -1,5 +1,14 @@
-"""Reproducible, data-derived grant figures. No generative image processing."""
+"""Reproducible, data-derived grant figures. No generative image processing.
+
+    uv run python scripts/grant_figures/render_figure.py            # gluteal + iliopsoas
+    uv run python scripts/grant_figures/render_figure.py --hamstrings-reference
+    uv run python scripts/grant_figures/render_figure.py --thigh --ct-dir <dir with ct_*_plain.png> --out <dir>
+
+--thigh adds the hamstrings and adductors (TotalSegmentator thigh_shoulder_muscles,
+compartment level) and the whole femur, all from output/seg_thigh.
+"""
 from pathlib import Path
+import argparse
 import json
 import sys
 import numpy as np
@@ -10,15 +19,30 @@ from scipy import ndimage
 from skimage import measure
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT=Path(__file__).resolve().parents[2] / 'tmp' / 'grant_figure'
-BASE=Path(r'C:\Users\a2189\Dropbox\Hip_cross-sectional_area\output')
-OUT=ROOT/'deliverables'; OUT.mkdir(exist_ok=True)
-CT_OUT=OUT
-WITH_HAM='--hamstrings-reference' in sys.argv
+REPO=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(REPO))
+import hip_paths
+
+ap=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('--hamstrings-reference',action='store_true',help='MuscleMap hamstrings (partial extraction)')
+ap.add_argument('--thigh',action='store_true',help='hamstrings + adductors from output/seg_thigh, whole femur')
+ap.add_argument('--ct-dir',type=Path,help='folder holding ct_*_plain.png (default: the deliverables folder)')
+ap.add_argument('--out',type=Path,help='output folder')
+ARGS=ap.parse_args()
+
+ROOT=REPO/'tmp'/'grant_figure'
+BASE=hip_paths.OUTPUT_DIR
+THIGH_SEG=hip_paths.SEG_THIGH_DIR
+OUT=ROOT/'deliverables'
+CT_OUT=ARGS.ct_dir or OUT
+WITH_HAM=ARGS.hamstrings_reference
+WITH_THIGH=ARGS.thigh
 if WITH_HAM:
-    OUT=OUT/'hamstrings_reference'; OUT.mkdir(exist_ok=True)
-CACHE=ROOT/'mesh_cache'; CACHE.mkdir(exist_ok=True)
-COLORS={'bone':(0.88,0.86,0.80),'medius':(0.20,0.48,0.73),'minimus':(0.87,0.31,0.23),'context':(0.61,0.64,0.67)}
+    OUT=OUT/'hamstrings_reference'
+OUT=ARGS.out or OUT; OUT.mkdir(parents=True,exist_ok=True)
+CACHE=ROOT/'mesh_cache'; CACHE.mkdir(parents=True,exist_ok=True)
+COLORS={'bone':(0.88,0.86,0.80),'medius':(0.20,0.48,0.73),'minimus':(0.87,0.31,0.23),'context':(0.61,0.64,0.67),
+        'hamstrings':(0.55,0.42,0.75),'adductors':(0.31,0.60,0.38)}
 
 def mesh(name,path,label=None):
     cache=CACHE/(name+'.vtp')
@@ -66,8 +90,25 @@ def render(entries,view,size=(1500,1800)):
     a=ns.vtk_to_numpy(w.GetOutput().GetPointData().GetScalars()).reshape(size[1],size[0],3)[::-1].copy();rw.Finalize()
     return Image.fromarray(a)
 
+FONTS={False:['C:/Windows/Fonts/meiryo.ttc','/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc'],
+       True:['C:/Windows/Fonts/meiryob.ttc','/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc']}
+
 def font(size,bold=False):
-    return ImageFont.truetype(str(Path('C:/Windows/Fonts')/('meiryob.ttc' if bold else 'meiryo.ttc')),size)
+    path=next(f for f in FONTS[bold] if Path(f).exists())
+    return ImageFont.truetype(path,size)
+
+def legend_items():
+    if WITH_THIGH:
+        return [('中殿筋','medius'),('小殿筋','minimus'),('腸腰筋','context'),('ハムストリングス','hamstrings'),('内転筋群','adductors')]
+    return [('中殿筋','medius'),('小殿筋','minimus'),('腸腰筋・ハムストリングス' if WITH_HAM else '腸腰筋','context')]
+
+def legend_xs(d,items,size,swatch,gap,left,right):
+    """Left edge of each legend entry, packed by text width and centred in [left, right]."""
+    widths=[swatch+swatch*.5+d.textlength(label,font=font(size)) for label,_ in items]
+    total=sum(widths)+gap*(len(items)-1)
+    x=(left+right-total)/2;xs=[]
+    for w in widths: xs.append(round(x));x+=w+gap
+    return xs
 
 def textcenter(d,xy,txt,size=40,bold=False,color='#1d2730'):
     d.text(xy,txt,font=font(size,bold),fill=color,anchor='mt')
@@ -76,7 +117,7 @@ def compose(front,back):
     # Panels deliberately avoid patient metadata; CT panels retain radiological orientation.
     w,h=3300,1700;can=Image.new('RGB',(w,h),'white');d=ImageDraw.Draw(can)
     textcenter(d,(455,30),'CT画像（3断面）',52,True)
-    ct_names=['01_ilium','02_midpoint','03_greater_trochanter'];titles=['腸骨部','中間レベル','大転子頂部付近']
+    ct_names=['01_ilium','02_midpoint','03_greater_trochanter'];titles=['上前腸骨棘部','中間レベル','大転子頂部付近']
     for i,(name,title) in enumerate(zip(ct_names,titles)):
         y=120+i*500
         textcenter(d,(455,y),f'{i+1}  {title}',37)
@@ -90,15 +131,18 @@ def compose(front,back):
     for x,label,img in [(1250,'前面',front),(2260,'後面',back)]:
         textcenter(d,(x+500,114),label,39)
         img=img.resize((1000,1200),Image.Resampling.LANCZOS);can.paste(img,(x,180))
-    legend=[('中殿筋','medius'),('小殿筋','minimus'),('腸腰筋・ハムストリングス' if WITH_HAM else '腸腰筋','context')]
-    for x,(label,kind) in zip([1320,1810,2310],legend):
+    legend=legend_items()
+    for x,(label,kind) in zip(legend_xs(d,legend,34,44,60,1250,3260),legend):
         col=tuple(round(c*255) for c in COLORS[kind]);d.rectangle((x,1460,x+44,1504),fill=col);d.text((x+65,1454),label,font=font(34),fill='#1d2730')
-    textcenter(d,(2250,1540),'参考版：ハムストリングスは部分抽出（近位部の抽出が不十分）' if WITH_HAM else '骨盤・大腿骨を位置関係の参照として表示',30,color='#59646e')
+    note=('参考版：ハムストリングスは部分抽出（近位部の抽出が不十分）' if WITH_HAM
+          else '骨盤・大腿骨・腸腰筋は位置関係の参照、ハムストリングス・内転筋群は筋群として表示' if WITH_THIGH
+          else '骨盤・大腿骨を位置関係の参照として表示')
+    textcenter(d,(2250,1540),note,30,color='#59646e')
     can.save(OUT/'grant_workflow_CT_3D.png',dpi=(300,300))
     can.resize((1650,850),Image.Resampling.LANCZOS).save(OUT/'grant_workflow_preview.png')
     pair=Image.new('RGB',(3100,2050),'white');pd=ImageDraw.Draw(pair)
     pair.paste(front,(0,100));pair.paste(back,(1600,100));textcenter(pd,(750,10),'前面',52,True);textcenter(pd,(2350,10),'後面',52,True)
-    for x,(label,kind) in zip([230,980,1720],legend):
+    for x,(label,kind) in zip(legend_xs(pd,legend,43,55,70,0,3100),legend):
         pd.rectangle((x,1940,x+55,1995),fill=tuple(round(c*255) for c in COLORS[kind]));pd.text((x+82,1935),label,font=font(43),fill='#1d2730')
     pair.save(OUT/'gluteal_context_3D_pair.png',dpi=(300,300))
 
@@ -107,12 +151,22 @@ def main():
     for name in ['hip_left','hip_right','sacrum']:
         entries.append((mesh(name,BASE/f'seg/{name}.nii.gz'),'bone'))
     for name in ['femur_left','femur_right']:
-        entries.append((mesh(name+'_extended' if WITH_HAM else name,ROOT/f'context_seg_extended/{name}.nii.gz' if WITH_HAM else BASE/f'seg/{name}.nii.gz'),'bone'))
+        if WITH_THIGH:
+            entries.append((mesh(name+'_full',THIGH_SEG/f'{name}.nii.gz'),'bone'))
+        else:
+            entries.append((mesh(name+'_extended' if WITH_HAM else name,ROOT/f'context_seg_extended/{name}.nii.gz' if WITH_HAM else BASE/f'seg/{name}.nii.gz'),'bone'))
     for kind in ['medius','minimus']:
         for side in ['left','right']:
             n=f'gluteus_{kind}_{side}';entries.append((mesh(n,BASE/f'seg/{n}.nii.gz'),kind))
     for side in ['left','right']:
-        n=f'iliopsoas_{side}';entries.append((mesh(n,ROOT/f'context_seg/{n}.nii.gz'),'context'))
+        n=f'iliopsoas_{side}'
+        # Same model and CT top edge either way; seg_thigh is the copy made on this machine.
+        src=THIGH_SEG/f'{n}.nii.gz' if (THIGH_SEG/f'{n}.nii.gz').exists() else ROOT/f'context_seg/{n}.nii.gz'
+        entries.append((mesh(n,src),'context'))
+    if WITH_THIGH:
+        for kind,stem in [('hamstrings','thigh_posterior_compartment'),('adductors','thigh_medial_compartment')]:
+            for side in ['left','right']:
+                entries.append((mesh(f'{stem}_{side}',THIGH_SEG/f'{stem}_{side}.nii.gz'),kind))
     mm=ROOT/'musclemap_seg/ct_pelvis_thigh_dseg.nii.gz'
     if WITH_HAM: assert mm.exists(), 'Hamstrings segmentation must exist before composing the labeled figure.'
     if WITH_HAM:

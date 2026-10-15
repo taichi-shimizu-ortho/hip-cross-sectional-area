@@ -1,11 +1,16 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
-import {Presentation,PresentationFile} from 'file:///C:/Users/a2189/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@oai/artifact-tool/dist/artifact_tool.mjs';
-const work='C:/Users/a2189/uv-envs/hip-cross-sectional-area';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+// Codex runtime locations under the home folder; RUNTIME_NODE_MODULES overrides the node_modules one.
+const home=os.homedir().replaceAll('\\','/');
+const runtime=home+'/.cache/codex-runtimes/codex-primary-runtime/dependencies';
+const nodeModules=process.env.RUNTIME_NODE_MODULES||runtime+'/node/node_modules';
+const {Presentation,PresentationFile}=await import(pathToFileURL(nodeModules+'/@oai/artifact-tool/dist/artifact_tool.mjs').href);
+const work=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..').replaceAll('\\','/');
 const build=work+'/tmp/grant_ppt';
 const assets=work+'/tmp/grant_figure/deliverables';
-const skill='C:/Users/a2189/.codex/plugins/cache/openai-primary-runtime/presentations/26.1011.11113/skills/presentations';
+const skill=home+'/.codex/plugins/cache/openai-primary-runtime/presentations/26.1011.11113/skills/presentations';
 await fs.mkdir(build,{recursive:true});
 await fs.mkdir(work+'/output/grant_ppt',{recursive:true});
 const fontPolicy={basis:'design',families:['Meiryo']};
@@ -42,5 +47,5 @@ s.speakerNotes.text='元画像：提供DICOM input/sampleDATA、InstanceNumber 1
 await fs.writeFile(build+'/preview.png',new Uint8Array(await (await p.export({slide:s,format:'png',scale:1})).arrayBuffer()));
 const candidate=build+'/candidate.pptx';await(await PresentationFile.exportPptx(p)).save(candidate);
 const {finalizePresentation}=await import(pathToFileURL(skill+'/container_tools/artifact_tool_utils.mjs').href);
-const result=await finalizePresentation({workspaceDir:work,candidatePath:candidate,finalPath:work+'/output/grant_ppt/grant_figure_editable.pptx',pythonExecutable:'C:/Users/a2189/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe',integrityValidatorPath:skill+'/container_tools/inspect_presentation_package_integrity.py',layoutValidatorPath:skill+'/container_tools/inspect_presentation_layout_geometry.py',layoutArgs:['--expected-slide-size-emu',`${1650*9525},${850*9525}`,'--validate-heading-fit'],explicitTotalSlideCount:1,fontPolicy,verifyArtifactToolImport:true,receiptPath:build+'/validation.json'});
+const result=await finalizePresentation({workspaceDir:work,candidatePath:candidate,finalPath:work+'/output/grant_ppt/grant_figure_editable.pptx',pythonExecutable:runtime+'/python/python.exe',integrityValidatorPath:skill+'/container_tools/inspect_presentation_package_integrity.py',layoutValidatorPath:skill+'/container_tools/inspect_presentation_layout_geometry.py',layoutArgs:['--expected-slide-size-emu',`${1650*9525},${850*9525}`,'--validate-heading-fit'],explicitTotalSlideCount:1,fontPolicy,verifyArtifactToolImport:true,receiptPath:build+'/validation.json'});
 console.log(JSON.stringify(result));

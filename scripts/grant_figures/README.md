@@ -30,6 +30,21 @@ CT images and 3D views are independent embedded images in the PPTX. Text, arrow,
 orientation markers and legend swatches are native editable objects. The 3D views
 are rendered images, not interactive 3D models.
 
+## Thigh version (hamstrings and adductors)
+
+Needs `output/seg_thigh/` from the README's optional thigh step (TotalSegmentator
+`thigh_shoulder_muscles`, licensed, plus `total` for the whole femur and iliopsoas).
+Compartments, not single muscles: posterior = hamstrings, medial = adductors.
+Runs on macOS with the project environment:
+
+    uv run python scripts/grant_figures/render_figure.py --thigh --ct-dir <dir with ct_*_plain.png> --out <dir>
+    uv run --with python-pptx python scripts/grant_figures/update_ppt.py --images <same dir>
+
+`update_ppt.py` edits the hand-edited `output/grant figure.pptx` in place: it swaps
+the two 3D pictures, rebuilds the legend and replaces the note line, and keeps a
+copy of the previous deck in the image folder. The proximal tendinous part of the
+hamstrings is not included in the compartment masks.
+
 ## Optional hamstrings reference
 
 MuscleMap wholebody v1.4 was evaluated locally using its MIT-licensed model:
