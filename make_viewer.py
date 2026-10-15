@@ -4,7 +4,9 @@ Reads the STL files written by reconstruct_3d.py, decimates them for the web,
 and embeds the geometry directly in an HTML file. The patient-derived geometry
 never leaves the machine — only the three.js runtime is fetched from a CDN.
 
-    uv run python make_viewer.py --mesh-dir data/mesh --out data/mesh/viewer.html
+    uv run python make_viewer.py
+
+Defaults read and write under the Dropbox data folder (see hip_paths.py).
 """
 
 import argparse
@@ -16,6 +18,8 @@ from pathlib import Path
 import numpy as np
 import vtk
 from vtk.util import numpy_support
+
+import hip_paths
 
 THREE_URL = "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"
 THREE_CACHE = Path(".cache/three.min.js")
@@ -34,7 +38,21 @@ STRUCTURES = [
 	("sacrum", "Sacrum", BONE_COLOR, "pelvis"),
 	("femur_left", "Femur L", BONE_COLOR, "femur"),
 	("femur_right", "Femur R", BONE_COLOR, "femur"),
+	# Thigh compartments, segmented on the full-length CT (see reconstruct_3d.py)
+	("thigh_medial_compartment_left", "Adductors L", "#4fb85c", "thigh"),
+	("thigh_medial_compartment_right", "Adductors R", "#a5cf4a", "thigh"),
+	("thigh_posterior_compartment_left", "Hamstrings L", "#9a6cf0", "thigh"),
+	("thigh_posterior_compartment_right", "Hamstrings R", "#cf7fe0", "thigh"),
+	("quadriceps_femoris_left", "Quadriceps L", "#e2557f", "thigh"),
+	("quadriceps_femoris_right", "Quadriceps R", "#f08aa8", "thigh"),
+	("sartorius_left", "Sartorius L", "#f0d348", "thigh"),
+	("sartorius_right", "Sartorius R", "#d9b23a", "thigh"),
+	("femur_full_left", "Femur L", BONE_COLOR, "femur"),
+	("femur_full_right", "Femur R", BONE_COLOR, "femur"),
 ]
+
+# The whole femur, when reconstructed, replaces the one cut off by the crop.
+REPLACED_BY = {"femur_left": "femur_full_left", "femur_right": "femur_full_right"}
 
 
 def read_stl(path):
@@ -76,7 +94,7 @@ def b64(a):
 
 HTML = """<!doctype html>
 <meta charset="utf-8">
-<title>Gluteal muscles 3D</title>
+<title>Hip muscles 3D</title>
 <style>
   :root {{
     --bg: #10141c; --panel: #161c27; --line: #263143;
@@ -126,13 +144,20 @@ HTML = """<!doctype html>
     <div id="err" hidden></div>
   </div>
   <div id="panel">
-    <h1>Gluteal muscles</h1>
+    <h1>Hip &amp; thigh muscles</h1>
     <div class="sub">CT 3D reconstruction</div>
 
     <h2>Muscles</h2>
     <div id="muscles"></div>
     <label class="slider">Gluteus medius opacity <b id="mov">35%</b>
       <input type="range" id="mop" min="5" max="100" value="35"></label>
+
+    <div id="thigh-sec" hidden>
+      <h2>Thigh muscles</h2>
+      <div id="thigh"></div>
+      <label class="slider">Thigh muscle opacity <b id="tov">100%</b>
+        <input type="range" id="top" min="5" max="100" value="100"></label>
+    </div>
 
     <h2>Reference</h2>
     <div id="bones"></div>
@@ -220,6 +245,8 @@ function decode(s, Type) {{
   return new Type(buf.buffer);
 }}
 
+const isMuscle = s => s.group === 'muscle' || s.group === 'thigh';
+
 DATA.structures.forEach(s => {{
   const pos = decode(s.verts, Float32Array);
   const idx = decode(s.faces, Uint32Array);
@@ -235,8 +262,8 @@ DATA.structures.forEach(s => {{
 
   const shell = s.name.includes('medius');   // drawn as a translucent skin
   const m = new THREE.Mesh(g, new THREE.MeshPhongMaterial({{
-    color: new THREE.Color(s.color), shininess: s.group === 'muscle' ? 34 : 14,
-    specular: s.group === 'muscle' ? 0x3d4a5e : 0x2b2f36,
+    color: new THREE.Color(s.color), shininess: isMuscle(s) ? 34 : 14,
+    specular: isMuscle(s) ? 0x3d4a5e : 0x2b2f36,
     transparent: true, opacity: shell ? 0.35 : 1,
     side: THREE.FrontSide, depthWrite: !shell,
   }}));
@@ -283,7 +310,7 @@ function fit() {{
 }}
 
 /** Visible = its group is on, its own box is ticked, and the side is in view. */
-const groupOn = {{muscle: true, pelvis: true, femur: true}};
+const groupOn = {{muscle: true, thigh: true, pelvis: true, femur: true}};
 let onlySide = null;
 function apply(refit) {{
   meshes.forEach(m => {{
@@ -404,6 +431,9 @@ function addGroupRow(host, group, label) {{
 
 meshes.filter(m => m.userData.group === 'muscle')
       .forEach(m => addRow(document.getElementById('muscles'), m));
+const thighRows = meshes.filter(m => m.userData.group === 'thigh');
+thighRows.forEach(m => addRow(document.getElementById('thigh'), m));
+document.getElementById('thigh-sec').hidden = !thighRows.length;
 addGroupRow(document.getElementById('bones'), 'pelvis', 'Pelvis (hip bones + sacrum)');
 addGroupRow(document.getElementById('bones'), 'femur', 'Femur');
 
@@ -420,7 +450,8 @@ function bindOpacity(sliderId, valueId, match) {{
   }};
 }}
 bindOpacity('mop', 'mov', s => s.name.includes('medius'));
-bindOpacity('bop', 'bov', s => s.group !== 'muscle');
+bindOpacity('top', 'tov', s => s.group === 'thigh');
+bindOpacity('bop', 'bov', s => !isMuscle(s));
 
 function resize() {{
   const w = view.clientWidth, h = view.clientHeight;
@@ -450,8 +481,8 @@ def three_js():
 
 def main():
 	ap = argparse.ArgumentParser(description=__doc__)
-	ap.add_argument("--mesh-dir", default="data/mesh", type=Path)
-	ap.add_argument("--out", default="data/mesh/viewer.html", type=Path)
+	ap.add_argument("--mesh-dir", default=hip_paths.MESH_DIR, type=Path)
+	ap.add_argument("--out", default=hip_paths.VIEWER, type=Path)
 	ap.add_argument("--target-triangles", default=16000, type=int)
 	ap.add_argument("--inline-three", action="store_true",
 					help="embed three.js instead of loading it from a CDN, so the "
@@ -467,6 +498,8 @@ def main():
 		if not stl.exists():
 			print(f"skip (not found): {stl}")
 			continue
+		if name in REPLACED_BY and (args.mesh_dir / f"{REPLACED_BY[name]}.stl").exists():
+			continue
 		verts, faces = to_arrays(weld(decimate(read_stl(stl), args.target_triangles)))
 		total += len(faces)
 		side = ("left" if name.endswith("_left")
@@ -476,7 +509,8 @@ def main():
 							   verts=b64(verts), faces=b64(faces)))
 		print(f"{label:<18} {len(verts):>6d} verts  {len(faces):>6d} tris")
 
-	note = ("Automatic segmentation (TotalSegmentator v2). Research use only — "
+	note = ("Automatic segmentation (TotalSegmentator v2). Thigh muscles are "
+			"compartments: hamstrings = posterior, adductors = medial. Research use only — "
 			"not for diagnosis. Patient-derived data: keep this file local.")
 	if args.inline_three:
 		three_tag = "<script>" + three_js() + "</script>"
@@ -489,6 +523,7 @@ def main():
 					  "being offline will stop it. Check the Network tab for that "
 					  "request, or rebuild with <code>--inline-three</code>.")
 
+	args.out.parent.mkdir(parents=True, exist_ok=True)
 	args.out.write_text(
 		HTML.format(data=json.dumps(dict(structures=structures, bone_color=BONE_COLOR)),
 					note=note, three_tag=three_tag, three_hint=three_hint),

@@ -1,10 +1,12 @@
-"""Build 3D surface models of the gluteal muscles from TotalSegmentator masks.
+"""Build 3D surface models of the gluteal and thigh muscles from TotalSegmentator masks.
 
 Reads the NIfTI masks produced by TotalSegmentator, turns each one into a
 smoothed triangle mesh with marching cubes, and writes an STL per structure
 plus a set of rendered views.
 
-    uv run python reconstruct_3d.py --seg-dir data/seg --out-dir data/mesh
+    uv run python reconstruct_3d.py
+
+Defaults read and write under the Dropbox data folder (see hip_paths.py).
 """
 
 import argparse
@@ -21,6 +23,8 @@ import vtk
 from scipy import ndimage
 from skimage import measure
 from vtk.util import numpy_support
+
+import hip_paths
 
 BONE_COLOR = "#ddd2bd"
 
@@ -40,6 +44,27 @@ BONES = [
 	("sacrum", "Sacrum", BONE_COLOR),
 	("femur_left", "Femur L", BONE_COLOR),
 	("femur_right", "Femur R", BONE_COLOR),
+]
+
+# Thigh compartments from the thigh_shoulder_muscles task, segmented on the
+# full-length CT (--thigh-seg-dir). Compartments, not individual muscles:
+# posterior = hamstrings, medial = adductors (+ gracilis).
+THIGH_MUSCLES = [
+	("thigh_medial_compartment_left", "Adductors L", "#4fb85c"),
+	("thigh_medial_compartment_right", "Adductors R", "#a5cf4a"),
+	("thigh_posterior_compartment_left", "Hamstrings L", "#9a6cf0"),
+	("thigh_posterior_compartment_right", "Hamstrings R", "#cf7fe0"),
+	("quadriceps_femoris_left", "Quadriceps L", "#e2557f"),
+	("quadriceps_femoris_right", "Quadriceps R", "#f08aa8"),
+	("sartorius_left", "Sartorius L", "#f0d348"),
+	("sartorius_right", "Sartorius R", "#d9b23a"),
+]
+
+# Whole femur from the same full-length CT, saved under its own stem so the
+# cropped femur above is kept as is: (mesh stem, label, colour, mask stem).
+THIGH_BONES = [
+	("femur_full_left", "Femur L (full)", BONE_COLOR, "femur_left"),
+	("femur_full_right", "Femur R (full)", BONE_COLOR, "femur_right"),
 ]
 
 
@@ -243,53 +268,75 @@ def render(meshes, out_path, title, size=(900, 780)):
 
 def main():
 	ap = argparse.ArgumentParser(description=__doc__)
-	ap.add_argument("--seg-dir", default="data/seg", type=Path)
-	ap.add_argument("--out-dir", default="data/mesh", type=Path)
+	ap.add_argument("--seg-dir", default=hip_paths.SEG_DIR, type=Path)
+	ap.add_argument("--thigh-seg-dir", default=hip_paths.SEG_THIGH_DIR, type=Path)
+	ap.add_argument("--out-dir", default=hip_paths.MESH_DIR, type=Path)
 	ap.add_argument("--target-triangles", default=60000, type=int)
 	ap.add_argument("--smooth-sigma", default=1.0, type=float)
 	args = ap.parse_args()
 	args.out_dir.mkdir(parents=True, exist_ok=True)
 
-	meshes, report = [], []
-	for kind, group in (("muscle", MUSCLES), ("bone", BONES)):
-		for name, label, color in group:
-			path = args.seg_dir / f"{name}.nii.gz"
-			if not path.exists():
-				print(f"skip (not found): {path}")
-				continue
+	# (kind, mesh stem, label, colour, mask path)
+	jobs = [(kind, name, label, color, args.seg_dir / f"{name}.nii.gz")
+			for kind, group in (("muscle", MUSCLES), ("bone", BONES))
+			for name, label, color in group]
+	jobs += [("muscle", name, label, color, args.thigh_seg_dir / f"{name}.nii.gz")
+			 for name, label, color in THIGH_MUSCLES]
+	jobs += [("bone", name, label, color, args.thigh_seg_dir / f"{mask}.nii.gz")
+			 for name, label, color, mask in THIGH_BONES]
 
-			mask, spacing, origin = load_mask(path)
-			n_vox = int(mask.sum())
-			if n_vox == 0:
-				print(f"skip (empty mask): {name}")
-				continue
-			mask = largest_component(mask)
-			volume_ml = n_vox * float(np.prod(spacing)) / 1000.0
+	meshes, report = {}, []
+	for kind, name, label, color, path in jobs:
+		if not path.exists():
+			print(f"skip (not found): {path}")
+			continue
 
-			verts, faces = mask_to_mesh(mask, spacing, origin, args.smooth_sigma)
-			poly = refine(to_vtk(verts, faces), args.target_triangles)
-			verts, faces = from_vtk(poly)
+		mask, spacing, origin = load_mask(path)
+		n_vox = int(mask.sum())
+		if n_vox == 0:
+			print(f"skip (empty mask): {name}")
+			continue
+		mask = largest_component(mask)
+		volume_ml = n_vox * float(np.prod(spacing)) / 1000.0
 
-			stl = args.out_dir / f"{name}.stl"
-			write_stl(poly, stl)
+		verts, faces = mask_to_mesh(mask, spacing, origin, args.smooth_sigma)
+		poly = refine(to_vtk(verts, faces), args.target_triangles)
+		verts, faces = from_vtk(poly)
 
-			# minimus sits deep to medius, so it stays opaque and medius is a shell
-			alpha = 0.35 if "medius" in name else 1.0
-			meshes.append(dict(verts=verts, faces=faces, poly=poly, color=color,
-							   alpha=alpha, label=label, kind=kind,
-							   side=side_of(name)))
-			report.append(dict(structure=name, label=label, kind=kind, voxels=n_vox,
-							   volume_ml=round(volume_ml, 1), triangles=len(faces),
-							   stl=str(stl)))
-			print(f"{label:<18} {volume_ml:7.1f} mL  {len(faces):>6d} tris  -> {stl}")
+		stl = args.out_dir / f"{name}.stl"
+		write_stl(poly, stl)
 
-	if not meshes:
+		# minimus sits deep to medius, so it stays opaque and medius is a shell
+		alpha = 0.35 if "medius" in name else 1.0
+		meshes[name] = dict(verts=verts, faces=faces, poly=poly, color=color,
+							alpha=alpha, label=label, kind=kind, side=side_of(name))
+		report.append(dict(structure=name, label=label, kind=kind, voxels=n_vox,
+						   volume_ml=round(volume_ml, 1), triangles=len(faces),
+						   stl=hip_paths.from_home(stl)))
+		print(f"{label:<18} {volume_ml:7.1f} mL  {len(faces):>6d} tris  -> {stl}")
+
+	def pick(names):
+		return [meshes[n] for n in names if n in meshes]
+
+	gluteal = pick([n for n, _, _ in MUSCLES] + [n for n, _, _ in BONES])
+	if not gluteal:
 		raise SystemExit("no masks found in " + str(args.seg_dir))
 
-	png = args.out_dir / "gluteal_muscles_3d.png"
-	render(meshes, png, "Gluteus medius / minimus — CT 3D reconstruction")
+	pngs = [args.out_dir / "gluteal_muscles_3d.png"]
+	render(gluteal, pngs[0], "Gluteus medius / minimus — CT 3D reconstruction")
+
+	thigh = pick([n for n, _, _ in THIGH_MUSCLES])
+	if thigh:
+		# Whole femur when the full-length CT has it, else the cropped one.
+		femur = pick([n for n, *_ in THIGH_BONES]) or pick(["femur_left", "femur_right"])
+		pngs.append(args.out_dir / "hip_thigh_muscles_3d.png")
+		render(pick([n for n, _, _ in MUSCLES]) + thigh
+			   + pick(["hip_left", "hip_right", "sacrum"]) + femur,
+			   pngs[1], "Gluteal and thigh muscles — CT 3D reconstruction")
+
 	(args.out_dir / "volumes.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
-	print(f"\nrender  -> {png}")
+	for png in pngs:
+		print(f"\nrender  -> {png}")
 	print(f"volumes -> {args.out_dir / 'volumes.json'}")
 
 

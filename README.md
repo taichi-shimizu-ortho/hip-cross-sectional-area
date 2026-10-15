@@ -1,129 +1,127 @@
-![image_example](https://user-images.githubusercontent.com/65467285/185387844-6766e2ce-43e0-40e9-a380-9eb92a7239b8.png)
+# Hip Cross-Sectional Area & 3D Reconstruction Pipeline
 
-# Pytorch Bayesian UNet model for segmentation and uncertainty prediction 
+A pipeline for segmenting gluteal muscles (gluteus medius, minimus, and maximus) from pelvic CT scans, calculating cross-sectional area (CSA) and volume, and building interactive 3D surface meshes.
 
-> Derived from [tha-santacruz/BayesianUNet](https://github.com/tha-santacruz/BayesianUNet)
-> (GPL-3.0). This copy adds a CT pipeline for the gluteal muscles; the upstream
-> example images are not carried over, so the history is small.
+This tool uses [TotalSegmentator](https://github.com/wasserth/TotalSegmentator) for automated anatomical segmentation and provides downstream scripts for quantitative muscle analysis and 3D visualization.
 
-This repository provides the well-known UNet model [[1]](#1) converted to a Bayesian UNet model.
-This model has been coded using Pytorch. This code is a modified version of the original the original implementation of UNet model in Pytorch by milesial (https://github.com/milesial/Pytorch-UNet).
-The model has been implemented using the Monte Carlo Dropout method [[2]](#2).
-It consists of adding a dropout layer at the end of each convolution layer, which is used both during training and testing times.
-This Bayesian model provides different scores (entropy and mutual information) that characterize uncertainty in predictions. 
+## Features
 
-## To set up the Python environment :
+- **Automated Segmentation**: Uses TotalSegmentator to segment gluteal muscles and pelvic bones from CT series.
+- **Cross-Sectional Area (CSA)**: Calculates the CSA profile of each muscle. Measurements are anchored to a reproducible anatomical landmark (the apex of the femoral head) to ensure consistency between subjects without picking slices by hand.
+- **3D Surface Reconstruction**: Generates smoothed STL meshes from the segmentation masks and renders standard anatomical views.
+- **Interactive 3D Viewer**: Builds a self-contained, patient-safe local HTML viewer for inspecting the 3D reconstructed anatomy.
 
-### With uv (recommended, works on Linux/Windows + macOS)
-Run ```uv sync```. This creates a `.venv` with Python 3.11 and every dependency pinned in `uv.lock`,
-then run scripts with ```uv run python train.py```.
+## Setup
 
-PyTorch is selected per platform automatically:
-- **Linux / Windows** : the CUDA 12.8 build from the `pytorch-cu128` index.
-- **macOS (Apple Silicon)** : the official PyPI build, which uses the Metal (MPS) backend.
+This project uses `uv` for Python environment management.
 
-The scripts pick the device in the order CUDA > MPS > CPU, so no changes are needed on a Mac.
-Note that Apple's MPS backend does not support mixed precision the way CUDA does — leave `--amp` off on macOS.
+### Installation
 
-### Legacy instructions
-1.	If you use conda, execute ```conda env create --name envname --file=environment.yml```. If you have a ResolvePackageNotFound error, edit the environment.yml file to place the mentionned packages under the pip section.
-2.	If you use pip, execute ```pip3 install -r requirements.txt```
-3.	Install pytorch by following the instructions of the Pytorch documentation : 		https://pytorch.org/get-started/locally/
+Run `uv sync` to create a `.venv` with Python 3.11 and install all dependencies pinned in `uv.lock`. You can then run scripts using `uv run python <script>.py`.
 
-## CT muscle segmentation (gluteus medius / minimus)
+PyTorch is selected automatically based on your platform:
+- **macOS (Apple Silicon)**: Uses the official PyPI build with Metal (MPS) acceleration.
+- **Linux / Windows**: Uses the CUDA 12.8 build.
 
-A separate pipeline from the Potsdam UNet above: it segments the gluteal muscles in a
-CT series with TotalSegmentator and reconstructs them as 3D surface meshes.
+*Note for macOS users*: The scripts pick the device in the order CUDA > MPS > CPU. Apple's MPS backend does not support mixed precision the way CUDA does, so do not use `--amp`.
+
+## Data Management
+
+**Patient data must never be committed to the repository.**
+By default, the code expects data to be located in a Dropbox folder outside this repository (configured in [`hip_paths.py`](hip_paths.py)).
+
+```
+~/Dropbox/Hip_cross-sectional_area/
+├── input/
+│   └── sampleDATA/          DICOM series (read only)
+└── output/
+    ├── ct.nii.gz            whole series as NIfTI
+    ├── ct_pelvis.nii.gz     cropped to the gluteal region
+    ├── seg/                 TotalSegmentator masks
+    ├── seg_thigh/           thigh compartments + whole femur (full-length CT)
+    ├── mesh/                STL, rendered views, volumes.json
+    ├── area/                CSA profile, summary, figures
+    └── viewer.html          interactive 3D viewer
+```
+
+All scripts read and write from these paths by default. You can override them by passing arguments like `--seg-dir` and `--out-dir`.
+
+## Workflow
+
+### 1. DICOM to NIfTI Conversion
+
+Convert the input DICOM series into a NIfTI volume and crop it to the gluteal region. The crop range is specific to the series—pick it from the CT so it spans the iliac crest down past the greater trochanter.
 
 ```bash
-# 1. DICOM series -> NIfTI, cropped to the gluteal region
 uv run python - <<'EOF'
 import SimpleITK as sitk
-r = sitk.ImageSeriesReader(); r.SetFileNames(r.GetGDCMSeriesFileNames("sampleDATA"))
-img = r.Execute(); sitk.WriteImage(img, "data/ct.nii.gz", useCompression=True)
-sitk.WriteImage(img[:, :, 680:940], "data/ct_pelvis.nii.gz", useCompression=True)
+import hip_paths as P
+P.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+r = sitk.ImageSeriesReader(); r.SetFileNames(r.GetGDCMSeriesFileNames(str(P.DICOM_DIR)))
+img = r.Execute(); sitk.WriteImage(img, str(P.CT), useCompression=True)
+# Example crop:
+sitk.WriteImage(img[:, :, 680:940], str(P.CT_PELVIS), useCompression=True)
 EOF
+```
 
-# 2. segment (downloads pretrained weights on first run, ~880 MB)
+### 2. Segmentation with TotalSegmentator
+
+Segment the muscles and bones. On the first run, this will download the pre-trained weights (~880 MB).
+
+```bash
+OUT=~/Dropbox/Hip_cross-sectional_area/output
+
+# Segment gluteal muscles and reference bones
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run TotalSegmentator \
-  -i data/ct_pelvis.nii.gz -o data/seg -d mps -s -sx \
+  -i "$OUT/ct_pelvis.nii.gz" -o "$OUT/seg" -d mps -s -sx \
   -rs gluteus_medius_left gluteus_medius_right \
       gluteus_minimus_left gluteus_minimus_right \
+      gluteus_maximus_left gluteus_maximus_right \
       hip_left hip_right sacrum femur_left femur_right
 
-# 3. meshes + STL + rendered views (muscles in colour, bone as reference)
-uv run python reconstruct_3d.py --seg-dir data/seg --out-dir data/mesh
+# Optional: thigh compartments and the whole femur, on the full-length CT
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run TotalSegmentator \
+  -i "$OUT/ct.nii.gz" -o "$OUT/seg_thigh" -d mps -ta thigh_shoulder_muscles
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run TotalSegmentator \
+  -i "$OUT/ct.nii.gz" -o "$OUT/seg_thigh" -d mps -rs femur_left femur_right
+```
 
-# 4. interactive local viewer (data/mesh/viewer.html)
+The `thigh_shoulder_muscles` task needs a TotalSegmentator license (free for non-commercial use; register it with `totalseg_set_license -l <number>`). It segments compartments rather than individual muscles: `thigh_posterior_compartment` is the hamstrings, `thigh_medial_compartment` the adductors. Quadriceps femoris and sartorius come with it. If `seg_thigh/` is absent, the later steps simply skip the thigh.
+
+> **Hardware acceleration**: Use `-d mps` on Apple Silicon, `-d gpu` on a CUDA machine, or `-d cpu` if no accelerator is available. Note that `PYTORCH_ENABLE_MPS_FALLBACK=1` is required for TotalSegmentator to run successfully on macOS.
+
+### 3. 3D Mesh Reconstruction
+
+Convert the segmentation masks into smoothed 3D surface meshes (STLs) and render standard anatomical views.
+
+```bash
+uv run python reconstruct_3d.py
+```
+
+Outputs are saved in `output/mesh/`, including the individual `.stl` files and static PNG renders from multiple angles (`gluteal_muscles_3d.png`, plus `hip_thigh_muscles_3d.png` when thigh masks exist).
+
+### 4. Interactive 3D Viewer
+
+Generate a self-contained, interactive HTML 3D viewer for the reconstructed anatomy.
+
+```bash
 uv run python make_viewer.py
 ```
 
-### Cross-sectional area
+This builds `output/viewer.html`. You can open this file in any web browser to interactively inspect the 3D meshes. The geometry is embedded securely within the file, and patient data never leaves your machine.
 
-`measure_area.py` turns the same masks into cross-sectional areas. It counts the
-mask voxels on every axial slice, scales them by the in-plane pixel area, and
-reports each muscle at a reproducible craniocaudal level — the apex of the
-femoral head, read from the femur mask, so no slice is picked by hand.
+### 5. Quantitative Area & Volume Measurement
+
+Calculate the cross-sectional area (CSA) and 3D volume for each segmented muscle.
 
 ```bash
-uv run python measure_area.py --seg-dir data/seg --ct data/ct_pelvis.nii.gz
+uv run python measure_area.py
 ```
 
-Writes to `data/area/`: `csa_profile.csv` (CSA of every muscle on every slice),
-`area_summary.json` (CSA at the reference level, peak CSA and its offset, mean
-CSA, volume, craniocaudal length and mean HU per muscle), plus a CSA-versus-level
-plot and an overlay of the reference slice. Pass `--level <slice>` to measure at
-a different height.
+`measure_area.py` outputs a per-slice CSA profile (`csa_profile.csv`), a JSON summary (`area_summary.json`), and visualization plots to `output/area/`. By default, it reports the CSA at the apex of the femoral head (read automatically from the femur masks) to ensure consistent craniocaudal leveling. Pass `--level <slice_index>` to measure at a manual height instead.
 
-Note that a muscle running past the edge of the crop is truncated: its CSA is
-still valid, its volume is not. Gluteus maximus in the sample series is cut off
-inferiorly for exactly this reason.
+Note that a muscle running past the edge of the crop is truncated: its CSA is still valid, its volume is not. Gluteus maximus is often cut off inferiorly for exactly this reason.
 
-The crop range in step 1 is specific to this series — pick it from the CT so it spans
-the iliac crest down past the greater trochanter.
+---
 
-The hip bones, sacrum and femurs are segmented purely as anatomical reference: they
-show the origin on the gluteal surface of the ilium and the insertion on the greater
-trochanter. The femurs are cut off by the inferior edge of the crop. In the viewer the
-bone can be dimmed or switched off, and the lateral views isolate one side.
-
-`-d mps` uses the Apple GPU; use `-d gpu` on a CUDA machine or `-d cpu` anywhere.
-
-**Research use only — not for diagnosis.** The masks are model output and have not been
-reviewed by a clinician. Patient data lives under `sampleDATA/` and `data/`, both
-gitignored; keep it that way.
-
-## To create tiles : 
-1.	Create a "Potsdam_data/" directory in the BayesianUNet directory.
-2.	Download the Potsdam Dataset (International Society for Photogrammetry and Remote Sensing, 2022) from this URL:
-	https://www.isprs.org/education/benchmarks/UrbanSemLab/Default.aspx
-3.	Uncompress it, and place the folders "1_DSM/", "4_Ortho_RGBIR/" and "5_Labels_all/" 
-	into the "Potsdam_data/" directory
-4.	Run ```python make_tiles.py```. It will create input and target tiles in "Potsdam_data/tiles/"
-
-## To train a model :
-1.	Run ```python train.py``` with the desired parameters. 
-	Refer to the arguments parser in the code to see the possible settings.
-2.	Training can be monitored using the Weights and Biases tool (see https://docs.wandb.ai/quickstart).
-	The URL to follow the training is provided in the console once validation occurs
-
-## To test a model :
-1.	Run ```python test.py``` with the desired parameters. 
-2.	Metrics are printed in the console and the confusion matrix is saved as an image
-
-## To predict an image :
-1.	Run ```python predict.py``` by specifing the model and the image(s) to predict.
-2.	If needed, try to expand the image(s) to create a batch of the size that has been used to train the model.
-	This offers better results.
-3.	If a ground truth is provided, "innacurate but certain" maps are produced
-4.	Resulting predictions and maps are saved in the "predictions/" repository
-
-**Update:** After the publication of this repository, a paper developing a similar approach has been published by Fisher et al [[3]](#3).
-
-## References
-
-<a id="1">[1]</a>  RONNEBERGER, Olaf, FISCHER, Philipp, et BROX, Thomas. U-net: Convolutional networks for biomedical image segmentation. In : International Conference on Medical image computing and computer-assisted intervention. Springer, Cham, 2015. p. 234-241. 
-
-<a id="2">[2]</a> GAL, Yarin et GHAHRAMANI, Zoubin. Dropout as a bayesian approximation: Representing model uncertainty in deep learning. In : international conference on machine learning. PMLR, 2016. p. 1050-1059. [2]
-
-<a id="3">[3]</a> Fisher, T.; Gibson, H.; Liu, Y.; Abdar, M.; Posa, M.; Salimi-Khorshidi, G.; Hassaine, A.; Cai, Y.; Rahimi, K.; Mamouei, M. Uncertainty-Aware Interpretable Deep Learning for Slum Mapping and Monitoring. Remote Sens. 2022, 14, 3072. https://doi.org/10.3390/rs14133072 
+**Research use only — not for diagnosis.** The masks are model output and have not been reviewed by a clinician. Patient data lives in the Dropbox folder above, outside the repository; `sampleDATA/` and `data/` stay gitignored in case a stray copy lands here.

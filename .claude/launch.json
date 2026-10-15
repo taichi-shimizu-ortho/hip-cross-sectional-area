@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8731", "--bind", "127.0.0.1", "--directory", "data/mesh"],
       "port": 8731
+    },
+    {
+      "name": "output-viewer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8732", "--bind", "127.0.0.1", "--directory", "../../Dropbox/Hip_cross-sectional_area/output"],
+      "port": 8732
     }
   ]
 }

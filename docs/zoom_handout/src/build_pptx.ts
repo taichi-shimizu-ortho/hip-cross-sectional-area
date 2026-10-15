@@ -11,6 +11,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, posix, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
@@ -22,6 +23,9 @@ import { COLOR, FONT, FRAME, PROTOTYPE, SLIDE } from './design.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(here, '..');
 const OUT_NAME = 'gluteal_area_handout.pptx';
+// The pipeline's output folder in Dropbox — the same place as hip_paths.OUTPUT_DIR.
+// Figure paths in handout.json are relative to it.
+const DATA_OUTPUT = resolve(homedir(), 'Dropbox/Hip_cross-sectional_area/output');
 const MONO = 'Consolas';
 
 type Bullet = { text: string; level?: number };
@@ -51,8 +55,10 @@ if (!existsSync(source)) {
 }
 const handout: Handout = JSON.parse(readFileSync(source, 'utf8'));
 
-/** Where the deck is written: meta.output_dir, or HANDOUT_OUT_DIR to override. */
-const OUT_DIR = resolve(ROOT, process.env.HANDOUT_OUT_DIR ?? String(handout.meta.output_dir ?? 'out'));
+/** Where the deck is written: meta.output_dir (relative to DATA_OUTPUT), or HANDOUT_OUT_DIR to override. */
+const OUT_DIR = process.env.HANDOUT_OUT_DIR
+	? resolve(process.env.HANDOUT_OUT_DIR)
+	: resolve(DATA_OUTPUT, String(handout.meta.output_dir ?? '.'));
 const srgb = (value: string) => ({ type: 'srgbClr' as const, value });
 
 const EMU_PER_INCH = 914400;
@@ -187,7 +193,7 @@ const pres = automizer
 	.load('handout_layouts.pptx', 'layout');
 
 // Figures are pulled in as media so the picture placeholders can point at them.
-for (const file of handout.slides.filter((s) => s.image).map((s) => resolve(ROOT, s.image!))) {
+for (const file of handout.slides.filter((s) => s.image).map((s) => resolve(DATA_OUTPUT, s.image!))) {
 	pres.loadMedia(basename(file), dirname(file));
 }
 
@@ -242,7 +248,7 @@ handout.slides.forEach((s, index) => {
 			case 'image': {
 				// Retarget the template's picture instead of adding a new one, so
 				// the prototype's relation is used up rather than left dangling.
-				const file = resolve(ROOT, s.image!);
+				const file = resolve(DATA_OUTPUT, s.image!);
 				const box = fit(file, { x: FRAME.marginX, y: 1.3, w: 7.3, h: 4.7 });
 				slide.modifyElement('figure', [
 					modify.setRelationTarget(basename(file)),

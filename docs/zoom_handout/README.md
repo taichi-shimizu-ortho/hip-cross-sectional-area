@@ -12,7 +12,7 @@ Its shape, for rebuilding one from scratch:
 
 ```jsonc
 {
-  "meta":   { "title": "...", "output_dir": "out", "font": "BIZ UDGothic" },
+  "meta":   { "title": "...", "output_dir": ".", "font": "BIZ UDGothic" },
   "agenda": [{ "title": "...", "minutes": 5 }],
   "slides": [
     // layout: title | bullets | steps | flow | image | table | closing
@@ -43,14 +43,16 @@ npm run all          # template + deck
   (pipeline boxes, figures) through pptxGenJS, and writes the speaker notes into
   the copied notes parts.
 
-The deck is written to `meta.output_dir` (default `out/`). Point it at a shared
-folder by editing that field, or for one run:
+Figure paths (`image`) and `meta.output_dir` are relative to the pipeline's
+output folder, `~/Dropbox/Hip_cross-sectional_area/output`
+(see `hip_paths.py` at the repo root), so the deck lands next to the data it
+was built from. To write it elsewhere for one run:
 
 ```bash
 HANDOUT_OUT_DIR=./out npm run build
 ```
 
-The figures come from `data/area/` and `data/mesh/`, so run `measure_area.py`
+The figures come from `output/area/` and `output/mesh/`, so run `measure_area.py`
 and `reconstruct_3d.py` first. Both the figures and the deck that embeds them
 are patient-derived: `handout.json`, `out/` and `node_modules/` are gitignored,
 and the built deck must not be committed.

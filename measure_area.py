@@ -5,10 +5,11 @@ pixel area, so each slice gives a CSA in cm^2. The craniocaudal reference level
 is taken from the bone masks (apex of the femoral head), which makes the
 measurement reproducible between subjects without hand-picking a slice.
 
-    uv run python measure_area.py --seg-dir data/seg --ct data/ct_pelvis.nii.gz
+    uv run python measure_area.py
 
 Writes a per-slice CSV profile, a summary JSON, a CSA-versus-level plot and an
-overlay of the reference slice.
+overlay of the reference slice. Defaults read and write under the Dropbox
+data folder (see hip_paths.py).
 """
 
 import argparse
@@ -22,6 +23,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import SimpleITK as sitk
+
+import hip_paths
 
 # (file stem, display name, colour) — same colours as the 3D reconstruction.
 MUSCLES = [
@@ -55,9 +58,9 @@ def femoral_head_apex(seg_dir, side):
 
 def main():
 	ap = argparse.ArgumentParser(description=__doc__)
-	ap.add_argument("--seg-dir", default="data/seg", type=Path)
-	ap.add_argument("--ct", default="data/ct_pelvis.nii.gz", type=Path)
-	ap.add_argument("--out-dir", default="data/area", type=Path)
+	ap.add_argument("--seg-dir", default=hip_paths.SEG_DIR, type=Path)
+	ap.add_argument("--ct", default=hip_paths.CT_PELVIS, type=Path)
+	ap.add_argument("--out-dir", default=hip_paths.AREA_DIR, type=Path)
 	ap.add_argument("--level", type=int, default=None,
 					help="slice index of the reference level; default is the femoral head apex")
 	args = ap.parse_args()
@@ -123,7 +126,7 @@ def main():
 					   + [round(float(p[i]), 3) for p in profiles.values()])
 
 	meta = dict(
-		ct=str(args.ct), seg_dir=str(args.seg_dir),
+		ct=hip_paths.from_home(args.ct), seg_dir=hip_paths.from_home(args.seg_dir),
 		voxel_mm=[round(sx, 4), round(sy, 4), round(sz, 4)],
 		pixel_area_mm2=round(pixel_area_mm2, 4),
 		reference="femoral head apex" if args.level is None else "manual slice",
