@@ -26,6 +26,8 @@ SEG_THIGH_DIR = OUTPUT_DIR / "seg_thigh"   # full-length CT: thigh muscles, whol
 MESH_DIR = OUTPUT_DIR / "mesh"
 AREA_DIR = OUTPUT_DIR / "area"
 VIEWER = OUTPUT_DIR / "viewer.html"
+JOA_DIR = OUTPUT_DIR / "joa"              # study settings and clinical-data analysis
+JOA_ANALYSIS_PLAN = INPUT_DIR / "joa_analysis_plan.json"
 
 
 def from_home(path):

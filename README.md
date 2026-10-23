@@ -48,6 +48,44 @@ All scripts read and write from these paths by default. You can override them by
 
 ## Workflow
 
+### JOA study settings
+
+To record the JOA application's cohort and sample-size settings before analyzing
+clinical spreadsheets, run:
+
+```bash
+uv run python configure_joa_study.py
+```
+
+The script reads the single `JOA*.docx` in `input/` (or `--application PATH`),
+checks the application's original settings, and independently reproduces the
+two-sample t-test sample size. The authoritative English analysis plan is saved
+as `input/joa_analysis_plan.json`, with a summary in `output/joa/study_setup.md`.
+The plan records the user-amended period of 2016-11-01 through 2026-10-31 and
+age/sex matching without BMI. Unspecified outcome-analysis choices remain unset.
+Use `--check-only` to validate without writing files. Source documents and
+workbooks are never modified.
+
+Export the workbook before cleaning it (the extraction script additionally
+needs `openpyxl`; the bundled artifact runtime already provides it):
+
+```bash
+uv run --with openpyxl python excel_to_json.py raw
+uv run --with openpyxl python excel_to_json.py clean \
+  --clean-json ~/Dropbox/Hip_cross-sectional_area/output/joa/surgery_schedule.normalized.json
+uv run python match_joa_cohorts.py --check-only
+uv run python match_joa_cohorts.py
+```
+
+Raw/normalized JSON exports are preserved. The final `surgery_schedule.cleaned.json`
+contains explicit hip-site records within the requested period. Ambiguous rows
+and exclusion references are retained in `hip_cases.review.json`. Propensity
+scores, pairs and balance diagnostics are in `cohort_matching.json`, with methods
+and limitations in `matching_report.md`. Matching is provisional until clinical
+eligibility and surgery completion have been checked. The matching script uses
+one index operation per identified patient, exact sex, a 0.2 SD logit caliper,
+and matching without replacement within sex-specific common support.
+
 ### 1. DICOM to NIfTI Conversion
 
 Convert the input DICOM series into a NIfTI volume and crop it to the gluteal region. The crop range is specific to the series—pick it from the CT so it spans the iliac crest down past the greater trochanter.
